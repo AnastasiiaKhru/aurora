@@ -1,8 +1,8 @@
 import { ControlEvent, TikTokLiveConnection, UserOfflineError, WebcastEvent, type WebcastChatMessage, type WebcastGiftMessage, type WebcastLikeMessage, type WebcastMemberMessage, type WebcastSocialMessage } from 'tiktok-live-connector'
-import { chatFrom, classifySocial, GiftStreaks, likeFrom, memberJoin, socialFrom, viewerKey } from './eventNormalizer.ts'
+import { chatFrom, classifySocial, commentOf, GiftStreaks, likeFrom, memberJoin, socialFrom, uniqueIdOf, usernameOf, viewerKey, wireChat, wireGift, wireLike, wireSocial } from './eventNormalizer.ts'
 import { SessionTeams, teamCommand } from './teams.ts'
 import type { AuroraSocket } from './WebSocketServer.ts'
-import type { CatalogGift, LikePayload } from './types.ts'
+import type { CatalogGift, TeamId } from './types.ts'
 
 interface BridgeOptions {
   username: string
@@ -17,11 +17,11 @@ export class TikTokLiveBridge {
   private readonly streaks = new GiftStreaks()
   private readonly catalog = new Map<string, CatalogGift>()
   private readonly present = new Set<string>()
-  private readonly likes = new Map<string, { payload: LikePayload; timer: NodeJS.Timeout }>()
   private timer: NodeJS.Timeout | null = null
   private delayMs = 3_000
   private stopped = false
   private connecting = false
+  private sampled = false
 
   constructor(private readonly options: BridgeOptions) {}
 
@@ -45,8 +45,6 @@ export class TikTokLiveBridge {
     this.stopped = true
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
-    for (const pending of this.likes.values()) clearTimeout(pending.timer)
-    this.likes.clear()
     const connection = this.connection
     this.connection = null
     if (connection) await connection.disconnect().catch(() => undefined)
@@ -146,19 +144,33 @@ export class TikTokLiveBridge {
     if (!viewer || this.present.has(viewer.userId)) return
     this.present.add(viewer.userId)
     console.log(`[JOIN] @${viewer.username}`)
-    this.options.socket.broadcast({ type: 'viewerJoined', payload: viewer })
+    this.options.socket.broadcast(wireSocial('join', viewer))
   }
 
   private onGift(message: WebcastGiftMessage): void {
+    const userId = viewerKey(message.user)
+    const username = usernameOf(message.user)
+    console.log('[TIKTOK GIFT]', {
+      user: username,
+      userId,
+      giftName: message.gift?.name || '',
+      giftId: message.giftId,
+      diamondCount: message.gift?.diamondCount,
+      repeatCount: message.repeatCount,
+      repeatEnd: message.repeatEnd,
+    })
+    if (!userId) {
+      console.log(`[EVENT IGNORED - USER NOT ON TEAM] ${username || 'unknown'}`)
+      return
+    }
     const decision = this.streaks.decide(message, this.teams, this.catalog)
     if (!decision) return
-    if (decision.kind === 'streak') {
+    if (decision.kind === 'streak' || !decision.payload) {
       console.log(`[GIFT] streak @${decision.username} ${decision.giftName} x${decision.count}`)
       return
     }
-    if (!decision.payload) return
     this.announce(decision.payload)
-    this.options.socket.broadcast({ type: 'giftReceived', payload: decision.payload })
+    this.options.socket.broadcast(wireGift(decision.payload))
     console.log('[GIFT]')
     console.log(`@${decision.username}`)
     console.log(decision.giftName)
@@ -169,64 +181,90 @@ export class TikTokLiveBridge {
   }
 
   private onLike(message: WebcastLikeMessage): void {
+    const userId = viewerKey(message.user)
+    const username = usernameOf(message.user)
+    console.log('[TIKTOK LIKE]', {
+      user: username,
+      userId,
+      likeCount: message.count,
+      totalLikeCount: message.total,
+    })
     const like = likeFrom(message, this.teams)
-    if (!like) return
-    const pending = this.likes.get(like.userId)
-    if (pending) {
-      pending.payload = { ...like, count: pending.payload.count + like.count }
+    if (!like) {
+      console.log(`[EVENT IGNORED - USER NOT ON TEAM] ${username || 'unknown'}`)
       return
     }
-    const timer = setTimeout(() => {
-      const item = this.likes.get(like.userId)
-      this.likes.delete(like.userId)
-      if (!item) return
-      this.announce(item.payload)
-      this.options.socket.broadcast({ type: 'likeReceived', payload: item.payload })
-      console.log(`[LIKE]\n@${item.payload.username} +${item.payload.count}`)
-    }, 100)
-    this.likes.set(like.userId, { payload: like, timer })
+    this.announce(like)
+    this.options.socket.broadcast(wireLike(like))
+    console.log(`[LIKE]\n@${like.username} +${like.count}`)
   }
 
   private onChat(message: WebcastChatMessage): void {
-    const requested = teamCommand(message.content ?? '')
-    const userId = viewerKey(message.user)
-    if (requested && userId) {
-      this.teams.assign(userId, requested)
-      const pending = this.likes.get(userId)
-      if (pending) pending.payload = { ...pending.payload, team: requested }
+    const comment = commentOf(message)
+    const uniqueId = uniqueIdOf(message.user)
+    const nickname = message.user?.nickname?.trim() || ''
+    const userId = viewerKey(message.user) || uniqueId || nickname
+    console.log('[TIKTOK CHAT]', { userId, uniqueId, nickname, comment })
+    if (!this.sampled) {
+      this.sampled = true
+      console.log('[CHAT SAMPLE]', sampleChat(message))
     }
     const chat = chatFrom(message, this.teams)
+    const resolvedId = chat?.userId || userId
+    const username = chat?.username || uniqueId || nickname || resolvedId
+    const avatarUrl = chat?.avatarUrl ?? ''
+    if (!resolvedId || !comment) {
+      if (!resolvedId) console.log(`[EVENT IGNORED - NO USER ID] ${nickname || uniqueId || 'unknown'}`)
+      return
+    }
+    if (this.routeChat(resolvedId, username, avatarUrl, comment)) return
     if (!chat) return
     console.log(`[CHAT]\n@${chat.username}: ${chat.text}`)
-    this.options.socket.broadcast({ type: 'chatReceived', payload: chat })
-    if (!requested) return
-    this.present.add(chat.userId)
-    console.log(`[TEAM] @${chat.username} chose ${requested}`)
-    this.options.socket.broadcast({
-      type: 'viewerJoined',
-      payload: { userId: chat.userId, username: chat.username, avatarUrl: chat.avatarUrl, team: requested },
-    })
+    this.options.socket.broadcast(wireChat({ ...chat, text: comment }))
+  }
+
+  /** Real chat and /admin test chat both pass through here, so a C/U always becomes the same team update. */
+  routeChat(userId: string, username: string, avatarUrl: string, comment: string): boolean {
+    const team = teamCommand(comment)
+    if (!team || !userId) return false
+    const command = String(comment ?? '').trim().toLowerCase()
+    console.log('[TEAM COMMAND]', { userId, uniqueId: username, command, team })
+    this.handleTeamCommand({ userId, username, avatarUrl, team })
+    return true
+  }
+
+  handleTeamCommand(viewer: { userId: string; username: string; avatarUrl: string; team: TeamId }): void {
+    console.log(`TEAM COMMAND DETECTED: ${viewer.team === 'red' ? 'CANADA' : 'USA'} @${viewer.username}`)
+    this.teams.assign(viewer.userId, viewer.team)
+    this.present.add(viewer.userId)
+    const payload = wireSocial('join', viewer, true)
+    console.log('[WS SEND TEAM]', payload)
+    this.options.socket.broadcast(payload)
+    console.log(`WS TEAM UPDATE SENT @${viewer.username} -> ${viewer.team === 'red' ? 'CANADA' : 'USA'}`)
   }
 
   private onSocial(message: WebcastSocialMessage, kind: 'follow' | 'share' | 'other'): void {
+    const userId = viewerKey(message.user)
+    const username = usernameOf(message.user)
+    if (kind === 'follow') console.log('[TIKTOK FOLLOW]', { user: username, userId })
+    if (kind === 'share') console.log('[TIKTOK SHARE]', { user: username, userId })
     const viewer = socialFrom(message, this.teams, kind)
     if (!viewer) {
+      if (!userId && kind !== 'other') console.log(`[EVENT IGNORED - USER NOT ON TEAM] ${username || 'unknown'}`)
       if (this.options.debug) console.log(`[TIKTOK] Social event ignored (${message.action || 'no action'})`)
       return
     }
     this.announce(viewer)
     console.log(`[${kind.toUpperCase()}] @${viewer.username}`)
-    this.options.socket.broadcast({ type: kind === 'follow' ? 'followReceived' : 'shareReceived', payload: viewer })
+    if (kind === 'other') return
+    this.options.socket.broadcast(wireSocial(kind, viewer))
   }
 
   private announce(viewer: { userId: string; username: string; avatarUrl: string; team: 'red' | 'blue' }): void {
     if (this.present.has(viewer.userId)) return
     this.present.add(viewer.userId)
     console.log(`[JOIN] @${viewer.username}`)
-    this.options.socket.broadcast({
-      type: 'viewerJoined',
-      payload: { userId: viewer.userId, username: viewer.username, avatarUrl: viewer.avatarUrl, team: viewer.team },
-    })
+    this.options.socket.broadcast(wireSocial('join', viewer))
   }
 
   private schedule(delay: number): void {
@@ -247,5 +285,23 @@ export class TikTokLiveBridge {
       const message = error instanceof Error ? error.message : 'unknown error'
       console.error(`[TIKTOK] Failed to handle ${label}: ${message}`)
     }
+  }
+}
+
+function sampleChat(message: WebcastChatMessage): Record<string, unknown> {
+  const user = message.user as (WebcastChatMessage['user'] & { userId?: unknown; uniqueId?: unknown }) | undefined
+  const shorten = (url: string | undefined) => (url ? `${url.split('?')[0]}…` : '')
+  return {
+    messageKeys: Object.keys(message),
+    content: message.content,
+    comment: commentOf(message),
+    userKeys: user ? Object.keys(user).slice(0, 60) : [],
+    'user.id': user?.id,
+    'user.userId': user?.userId,
+    'user.uniqueId': user?.uniqueId,
+    'user.displayId': user?.displayId,
+    'user.nickname': user?.nickname,
+    'user.avatarThumb': shorten(user?.avatarThumb?.urlList?.[0]),
+    'user.avatarMedium': shorten(user?.avatarMedium?.urlList?.[0]),
   }
 }

@@ -14,16 +14,11 @@ export function otherTeam(team: TeamId): TeamId {
   return team === 'red' ? 'blue' : 'red'
 }
 
+/** A whole comment of C/Canada or U/USA. Words like "cute" or "c u later" stay ordinary chat. */
 export function teamCommand(text: string): TeamId | null {
-  const command = text.trim().toLowerCase().replace(/[\u200b-\u200d\ufeff]/g, '')
-  const isCanadaCommand = command === 'c' || command === 'canada'
-  const isUsaCommand =
-    command === 'u' ||
-    command === 'usa' ||
-    command === 'u.s.a.' ||
-    command === 'united states'
-  if (isCanadaCommand) return 'red'
-  if (isUsaCommand) return 'blue'
+  const command = String(text ?? '').replace(/[\u200b-\u200d\ufeff]/g, '').replace(/\u00a0/g, ' ').trim().toLowerCase()
+  if (command === 'c' || command === 'canada') return 'red'
+  if (command === 'u' || command === 'usa') return 'blue'
   return null
 }
 

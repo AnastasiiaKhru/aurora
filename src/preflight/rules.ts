@@ -44,14 +44,10 @@ export function likeShotPlan(count: number): { amount: number; shots: number; da
 
 export type JoinDecision = 'create' | 'keep' | 'switch'
 
-export function decideJoin(
-  existing: { team: TeamId } | null,
-  preferred: TeamId,
-  explicit: boolean,
-  locked: boolean,
-): JoinDecision {
+/** A typed C/U always wins, even over an earlier typed choice; implicit joins never move anyone. */
+export function decideJoin(existing: { team: TeamId } | null, preferred: TeamId, explicit: boolean): JoinDecision {
   if (!existing) return 'create'
-  if (!explicit || locked) return 'keep'
+  if (!explicit) return 'keep'
   if (existing.team !== preferred) return 'switch'
   return 'keep'
 }

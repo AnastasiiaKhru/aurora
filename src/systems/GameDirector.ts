@@ -13,12 +13,14 @@ import type {
 } from '../types/Battle.ts'
 import type { BattleFeedItem, BattleFeedTone, GiftEvent } from '../types/Events.ts'
 import type { AttackType, GiftRarity, ShakeLevel, TikTokGift } from '../types/Gift.ts'
+import type { Player } from '../types/Player.ts'
 import type { TeamAssignMode, TeamId } from '../types/Team.ts'
 import { initialsOf } from '../utils/format.ts'
 import { comboIntensity, comboScoreFactor } from '../utils/math.ts'
 import { otherTeam } from '../utils/team.ts'
-import { acceptEvent, acceptSocial, decideJoin, giftCountsTowardScore, likeShotPlan } from '../preflight/rules.ts'
-import { AttractClock, allowedNpcDamage, applyNpcHealth, attractModeConfig, attractModePlayers, isNpcId, realTeamCounts } from './attractMode.ts'
+import { acceptEvent, acceptSocial, decideJoin, likeShotPlan } from '../preflight/rules.ts'
+import { AttractClock, allowedNpcDamage, applyNpcHealth, attractModeConfig, attractModePlayers, isGeneratedId, isNpcId, realTeamCounts } from './attractMode.ts'
+import { rankVictory } from './victoryRank.ts'
 import {
   AUTO_BATTLE_CONFIG,
   AutoBattleClock,
@@ -29,12 +31,13 @@ import {
   type AutoAction,
 } from './autoBattle.ts'
 import { noteConsoleError } from '../preflight/session.ts'
+import { cinemaOf } from '../game/attacks/cinema.ts'
 import { styles, type AttackStyle } from '../game/attacks/style.ts'
 import { AttackSystem } from './AttackSystem.ts'
 import { BattleSystem } from './BattleSystem.ts'
 import { ComboSystem } from './ComboSystem.ts'
 import { DamageSystem } from './DamageSystem.ts'
-import { GiftSystem } from './GiftSystem.ts'
+import { giftPower } from './giftPower.ts'
 import { MomentumSystem } from './MomentumSystem.ts'
 import { freshRoster, PlayerSystem } from './PlayerSystem.ts'
 import { nextRoundCue } from './roundCue.ts'
@@ -57,12 +60,26 @@ import {
 
 type MusicLevel = 'normal' | 'rush' | 'final' | 'victory'
 
+export interface SwitchNote {
+  id: string
+  text: string
+  team: TeamId
+  fromX: number
+  fromY: number
+  fromTeam: TeamId
+}
+
 const COUNT_MS = 5_000
 const FIGHT_MS = 720
+const LIKE_BURST_GAP_MS = 0
+const GIFT_BURST_GAP_MS = 0
+/** Pending attacks above which a like burst collapses to a few heavier bolts. */
+const LIKE_CROWD = 90
+/** Cinematic gift scenes play at this fraction of their authored length. */
+const CINEMA_PACE = 0.34
 
 export class GameDirector {
   readonly players = new PlayerSystem()
-  readonly gifts = new GiftSystem()
   readonly attacks = new AttackSystem()
   readonly combos = new ComboSystem()
   readonly momentum = new MomentumSystem()
@@ -80,6 +97,7 @@ export class GameDirector {
 
   teamAssignMode: TeamAssignMode = battleConfig.teamAssignMode
   cinematic = 0
+  cinemaLive = false
   hitStop = 0
   teamFlash = { red: 0, blue: 0 }
   epoch = 1
@@ -116,6 +134,9 @@ export class GameDirector {
   private combatSealed = false
   private countdownKind: 'opening' | 'next' = 'opening'
   private restarting = false
+  private victoryArmedAt = 0
+  private concluding = false
+  private resultsCountdownLogged = false
   private roundBumped = false
   private readonly roster = new Map<string, RosterMember>()
   private previewSerial = 0
@@ -126,9 +147,18 @@ export class GameDirector {
   private roleAccum = 0
   private saveAccum = 0
   private readonly seenAttacks = new Set<number>()
+  private switchNotes: SwitchNote[] = []
 
   get leading(): boolean {
     return this.role === 'lead'
+  }
+
+  /** Team switches since the last call, for the battlefield to animate once. */
+  takeSwitchNotes(): SwitchNote[] {
+    if (this.switchNotes.length === 0) return []
+    const notes = this.switchNotes
+    this.switchNotes = []
+    return notes
   }
 
   /** The stage window takes the shared match so a refresh keeps one live game. */
@@ -209,7 +239,7 @@ export class GameDirector {
     if (meters.frames > 45) meters.lowestFps = meters.lowestFps === 0 ? fps : Math.min(meters.lowestFps, fps)
     meters.attacks = this.attacks.pending
     meters.players = this.players.players.size
-    meters.queue = this.gifts.queued
+    meters.queue = this.attacks.queue.length
   }
 
   stopLoop(): void {
@@ -291,22 +321,28 @@ export class GameDirector {
   endRound(winner: VictoryResult): void {
     if (this.relay({ name: 'end', winner })) return
     if (this.battle.status !== 'running') return
-    const leaders = this.roundLeaders(winner)
+    const contributions = this.players.leaderboard(24).map((entry) => ({
+      id: entry.id,
+      username: entry.username,
+      team: entry.team,
+      battlePoints: entry.battlePoints,
+      participated: entry.participated === true,
+    }))
+    const leaders = rankVictory(this.players.leaderboard(24), winner).map((entry) => ({ ...entry }))
     const portraits = this.portraitsFor(winner)
+    const country = winner === 'red' ? 'canada' : winner === 'blue' ? 'usa' : 'draw'
+    console.log('BATTLE ENDED', country)
+    console.log('FINAL PLAYER CONTRIBUTIONS', contributions)
+    console.log('TOP 3 SNAPSHOT', leaders.map((entry) => ({ username: entry.username, team: entry.team, battlePoints: entry.battlePoints })))
     if (!this.battle.lockVictory(winner, leaders, portraits)) return
+    this.resultsCountdownLogged = false
+    console.log('RESULTS STATE STARTED')
     this.invalidateCombat()
     const label = winner === 'red' ? 'RED' : winner === 'blue' ? 'BLUE' : 'DRAW'
     console.log(`[ROUND] Winner: ${label}`)
     console.log('[ROUND] Combat locked')
     const loser = winner === 'red' ? 'blue' : winner === 'blue' ? 'red' : null
-    if (loser) {
-      this.teamFlash[loser] = 1
-      for (const body of this.players.bodies.values()) {
-        if (body.team !== loser || body.dying > 0) continue
-        body.hp = 0
-        body.dying = battleConfig.playerDeathSeconds
-      }
-    }
+    if (loser) this.teamFlash[loser] = 1
     if (winner === 'red' || winner === 'blue') this.players.cheer(winner)
     this.cinematic = Math.max(this.cinematic, 0.42)
     this.nextRoundWall = 0
@@ -380,22 +416,52 @@ export class GameDirector {
     this.publish()
   }
 
+  receiveLive(event: TikTokLiveEvent): void {
+    if (!this.leading) {
+      postBattle({ type: 'event', event })
+      return
+    }
+    this.applyRemoteEvent(event)
+  }
+
+  /** The one join/switch path for real TikTok chat, /admin tests and the simulator. */
   handleJoin(userId: string, username: string, avatarUrl: string, preferred: TeamId, explicit = false): void {
-    const existing = this.players.players.get(userId) ?? this.playerByName(username) ?? null
-    const decision = decideJoin(existing, preferred, explicit, existing ? this.isLocked(existing.id) : false)
+    if (explicit) console.log(`TEAM COMMAND DETECTED: ${teamLabel(preferred)} @${username}`)
+    let existing = this.players.players.get(userId) ?? this.viewerByName(username) ?? null
+    if (explicit) console.log(`PLAYER FOUND: ${existing ? 'true' : 'false'}`)
+    if (existing && explicit && this.isDefeated(existing.id)) {
+      console.log(`PLAYER DEFEATED - REJOINING @${username}`)
+      this.roster.delete(existing.id)
+      this.players.remove(existing.id)
+      existing = null
+    }
+    const decision = decideJoin(existing, preferred, explicit)
     if (existing && decision === 'keep') {
+      if (explicit) console.log(`CURRENT TEAM: ${teamLabel(existing.team)} (already there, no duplicate)`)
       if (avatarUrl) this.players.refreshAvatar(existing.id, avatarUrl)
+      if (explicit) {
+        this.chosenTeams.set(`explicit:${existing.id}`, existing.team)
+        this.players.spotlight(existing.id)
+      }
       this.rememberTeam(existing.id, username, existing.team)
       this.rememberMember(existing.id)
+      if (explicit) this.shareNow()
       return
     }
     if (existing && decision === 'switch') {
+      console.log(`CURRENT TEAM: ${teamLabel(existing.team)}`)
+      console.log(`SWITCHING ${teamLabel(existing.team)} -> ${teamLabel(preferred)}`)
       if (avatarUrl) this.players.refreshAvatar(existing.id, avatarUrl)
+      const before = this.players.bodies.get(existing.id)
+      const from = before ? { x: before.x, y: before.y, team: before.team } : null
       this.players.setTeam(existing.id, preferred)
+      this.players.spotlight(existing.id)
       this.chosenTeams.set(`explicit:${existing.id}`, preferred)
       this.rememberTeam(existing.id, username, preferred)
       this.rememberMember(existing.id)
-      this.publish()
+      if (from) this.switchNotes.push({ id: existing.id, text: `@${username} → ${teamFlag(preferred)} ${teamLabel(preferred)}`, team: preferred, fromX: from.x, fromY: from.y, fromTeam: from.team })
+      if (this.switchNotes.length > 12) this.switchNotes.splice(0, this.switchNotes.length - 12)
+      this.shareNow()
       return
     }
     const id = userId || `fan-${username.trim().toLowerCase() || 'guest'}`
@@ -407,10 +473,31 @@ export class GameDirector {
       avatarKey: '',
       initials: initialsOf(username),
     })
-    if (explicit) this.chosenTeams.set(`explicit:${id}`, preferred)
+    this.players.spotlight(id)
+    if (explicit) {
+      this.chosenTeams.set(`explicit:${id}`, preferred)
+      console.log(`PLAYER CREATED @${username} -> ${teamLabel(preferred)}`)
+    }
     this.rememberTeam(id, username, preferred)
     this.rememberMember(id)
+    this.shareNow()
+  }
+
+  /** Pushes a roster change to the HUD and every other window right away instead of on the next save tick. */
+  private shareNow(): void {
     this.publish()
+    if (this.role === 'lead') this.writeSave(true)
+  }
+
+  /** Name fallback for viewers without an id; never hands a real viewer a filler player's circle. */
+  private viewerByName(username: string | undefined): Player | undefined {
+    const name = username?.trim().toLowerCase()
+    if (!name) return undefined
+    for (const player of this.players.players.values()) {
+      if (player.isNpc || isNpcId(player.id) || isGeneratedId(player.id)) continue
+      if (player.username.trim().toLowerCase() === name) return player
+    }
+    return undefined
   }
 
   handleLeave(userId: string, username: string): void {
@@ -425,20 +512,33 @@ export class GameDirector {
   }
 
   handleGift(event: GiftEvent): void {
-    if (!this.combatOpen) return
-    if (!giftCountsTowardScore(event)) {
-      this.resolveGift(event, Math.max(1, event.giftCount), performance.now())
-      this.dirty = true
+    const team = this.sideFor(event.userId, event.username, event.team)
+    if (!team) {
+      console.log(`[EVENT IGNORED - USER NOT ON TEAM] ${event.username || 'unknown'}`)
       return
     }
-    this.gifts.push(event)
+    const settled: GiftEvent = { ...event, team }
+    if (!this.combatOpen) return
+    const value = Math.max(0, settled.coinValue ?? 0) * Math.max(1, settled.giftCount)
+    console.log(`[GIFT ATTACK] ${settled.username} | ${settled.giftName} | ${value}`)
+    this.resolveGift(settled, Math.max(1, settled.giftCount), performance.now())
     this.dirty = true
   }
 
-  handleLike(team: TeamId, count: number, userId?: string, username?: string, avatarUrl = ''): void {
+  handleLike(team: TeamId | undefined, count: number, userId?: string, username?: string, avatarUrl = ''): void {
+    const name = username || 'viewer'
+    if (!userId && !username) {
+      console.log('[EVENT IGNORED - USER NOT ON TEAM] unknown')
+      return
+    }
+    const chosen = this.sideFor(userId, name, team)
+    if (!chosen) {
+      console.log(`[EVENT IGNORED - USER NOT ON TEAM] ${name}`)
+      return
+    }
     if (!this.combatOpen) return
+    console.log(`[LIKE ATTACK] ${name} x ${Math.max(1, Math.round(count) || 1)}`)
     this.autoBattle.noteViewer(performance.now(), 'like')
-    const chosen = this.sideFor(userId, username, team)
     const id = this.ensureOnField(userId, username || 'guest', chosen, avatarUrl)
     const side = this.battle.team(chosen)
     const plan = likeShotPlan(count)
@@ -446,12 +546,12 @@ export class GameDirector {
     side.likesTotal += amount
     side.likeBank += amount
     side.score += amount * battleConfig.likeScoreEach
+    this.creditViewer(id, amount * battleConfig.likeScoreEach)
     const origin = this.launcher(chosen, id)
     const frenzy = amount >= 100 ? 4 : amount >= 50 ? 3 : amount >= 25 ? 2 : amount >= 10 ? 1 : 0
-    if (origin.id && frenzy >= 3) this.players.swell(origin.id, 0.06, 0.22)
-    const shots = plan.shots
-    const boltDamage = plan.damageEach
-    if (origin.id) this.players.pulse(origin.id)
+    const crowded = this.attacks.pending > LIKE_CROWD
+    const shots = crowded ? Math.min(plan.shots, 3) : plan.shots
+    const boltDamage = plan.totalDamage / shots
     for (let i = 0; i < shots; i += 1) {
       const foe = this.aim(chosen)
       this.launch(
@@ -464,7 +564,7 @@ export class GameDirector {
           toY: foe.y,
           targetId: foe.id,
           intensity: 0.62 + frenzy * 0.08,
-          duration: 0.32,
+          duration: 0.7,
           damage: boltDamage,
           shake: 'none',
           particleIntensity: frenzy >= 3 ? 0.45 : 0.2,
@@ -474,16 +574,20 @@ export class GameDirector {
           giftName: 'Like',
           combo: amount,
           rarity: 'micro',
-          impacts: [0.86],
+          impacts: [0.74],
+          power: 1 + frenzy * 0.06,
         },
-        110 + i * 24,
+        i * LIKE_BURST_GAP_MS,
       )
     }
+    if (origin.id) this.players.pulse(origin.id)
+    if (origin.id && frenzy >= 3) this.players.swell(origin.id, 0.06, 0.22)
     const thresholds = [...battleConfig.likeThresholds].sort((a, b) => b.likes - a.likes)
     for (const threshold of thresholds) {
       if (side.likeBank < threshold.likes) continue
       side.likeBank -= threshold.likes
       side.score += threshold.score
+      this.creditViewer(id, threshold.score)
       this.spawnPulse(side.id, threshold.intensity, threshold.damage, `${threshold.likes.toLocaleString('en-US')} likes`, id)
       if (origin.id) this.players.swell(origin.id, threshold.likes >= 1000 ? 3.4 : threshold.likes >= 500 ? 2.9 : 2.4, 0.48)
       this.pushFeed(`${side.name} surged · ${threshold.likes.toLocaleString('en-US')} likes`, side.id, side.id)
@@ -493,28 +597,38 @@ export class GameDirector {
     this.publish()
   }
 
-  handleFollow(username: string, team: TeamId, userId?: string, avatarUrl = ''): void {
+  handleFollow(username: string, team: TeamId | undefined, userId?: string, avatarUrl = ''): void {
     if (!this.combatOpen) return
     this.autoBattle.noteViewer(performance.now(), 'follow')
     if (!acceptSocial(this.socialOnce, 'follow', userId || username)) return
     const chosen = this.sideFor(userId, username, team)
+    if (!chosen) {
+      console.log(`[EVENT IGNORED - USER NOT ON TEAM] ${username || 'unknown'}`)
+      return
+    }
     const id = this.ensureOnField(userId, username, chosen, avatarUrl)
+    this.spawnFollow(chosen, id, username)
     const side = this.battle.team(chosen)
     side.score += battleConfig.followScore
-    this.spawnFollow(chosen, id, username)
+    this.creditViewer(id, battleConfig.followScore)
     this.pushFeed(`@${username} followed`, side.id, side.id)
     this.publish()
   }
 
-  handleShare(username: string, team: TeamId, userId?: string, avatarUrl = ''): void {
+  handleShare(username: string, team: TeamId | undefined, userId?: string, avatarUrl = ''): void {
     if (!this.combatOpen) return
     this.autoBattle.noteViewer(performance.now(), 'share')
     if (!acceptSocial(this.socialOnce, 'share', userId || username)) return
     const chosen = this.sideFor(userId, username, team)
+    if (!chosen) {
+      console.log(`[EVENT IGNORED - USER NOT ON TEAM] ${username || 'unknown'}`)
+      return
+    }
     const id = this.ensureOnField(userId, username, chosen, avatarUrl)
+    this.spawnShare(chosen, id, username)
     const side = this.battle.team(chosen)
     side.score += battleConfig.shareScore
-    this.spawnShare(chosen, id, username)
+    this.creditViewer(id, battleConfig.shareScore)
     this.pushFeed(`@${username} shared the battle`, side.id, side.id)
     this.publish()
   }
@@ -523,7 +637,10 @@ export class GameDirector {
     if (!this.combatOpen) return
     this.autoBattle.noteViewer(performance.now(), 'comment')
     const chosen = this.choiceFor(userId, username) ?? this.players.players.get(userId)?.team ?? this.playerByName(username)?.team
-    if (!chosen) return
+    if (!chosen) {
+      console.log(`[EVENT IGNORED - USER NOT ON TEAM] ${username || 'unknown'}`)
+      return
+    }
     const id = this.ensureOnField(userId, username, chosen, avatarUrl)
     this.spawnComment(chosen, id, username)
     this.publish()
@@ -543,22 +660,93 @@ export class GameDirector {
       return 0
     }
     const portion = command.damage / Math.max(1, command.impacts.length)
-    const { dealt, target } = this.damage.apply(command.team, portion, this.battle.red, this.battle.blue)
+    const { dealt, target } = this.strikeTeam(command.team, portion)
     this.players.flinch(target, x, y, Math.min(1.15, 0.35 + command.intensity * 0.45))
     if (tickIndex === 0 && command.targetId) {
       const marked = this.players.bodies.get(command.targetId)
       if (marked && marked.team !== command.team) this.players.strike(command.targetId, avatarHit(command))
     }
-    this.teamFlash[target] = Math.min(1, this.teamFlash[target] + 0.22 + command.intensity * 0.18)
+    const flash = command.rarity === 'legendary' ? 0.9 : command.rarity === 'large' ? 0.55 : 0.22 + command.intensity * 0.18
+    this.teamFlash[target] = Math.min(1, this.teamFlash[target] + flash)
     if (tickIndex === 0) {
       this.sound.playImpact(command)
-      if (command.rarity === 'legendary') this.cinematic = Math.max(this.cinematic, 0.12)
+      if (command.rarity === 'legendary') this.cinematic = Math.max(this.cinematic, 0.9)
+      else if (command.rarity === 'large') this.cinematic = Math.max(this.cinematic, 0.48)
       if (command.rarity === 'large' || command.rarity === 'legendary' || command.intensity >= 1) this.players.cheer(command.team)
     }
-    const winner = this.battle.wipeWinner()
-    if (winner) this.endRound(winner)
     this.dirty = true
     return dealt
+  }
+
+  /**
+   * Takes the same number of points from the enemy team for every person this hit reaches.
+   * Returns that per-person amount so the battlefield can show it.
+   */
+  spendHitPoints(command: AttackCommand, people: number): number {
+    const each = hitPointEach(command, people)
+    if (each <= 0 || people <= 0 || command.npcKind) return 0
+    if (!this.leading) return each
+    if (command.roundToken != null && command.roundToken !== this.combatRound) return 0
+    if (!this.combatOpen || this.battle.status !== 'running') return 0
+    const enemy = command.team === 'red' ? this.battle.blue : this.battle.red
+    enemy.score = Math.max(0, enemy.score - each * people)
+    this.dirty = true
+    return each
+  }
+
+  /** Knocks every extra opponent a shot connects with. Team health still drops once in onImpact. */
+  splashStrike(command: AttackCommand, ids: readonly string[]): void {
+    if (command.ambient || command.npcKind) return
+    for (const id of ids) {
+      if (!id || id === command.targetId) continue
+      const marked = this.players.bodies.get(id)
+      if (!marked || marked.team === command.team || marked.dying > 0) continue
+      this.players.strike(id, avatarHit(command))
+    }
+  }
+
+  /**
+   * Applies damage to the enemy team's real HP, then finishes from that new value.
+   * A second projectile in the same turn sees the battle is no longer running.
+   */
+  private strikeTeam(attacker: TeamId, amount: number): { dealt: number; target: TeamId } {
+    const target: TeamId = attacker === 'red' ? 'blue' : 'red'
+    if (this.concluding || this.battle.status !== 'running') return { dealt: 0, target }
+    const { dealt, next } = this.damage.apply(attacker, amount, this.battle.red, this.battle.blue)
+    if (next <= 0) this.conclude()
+    return { dealt, target }
+  }
+
+  private conclude(): void {
+    if (this.concluding || this.battle.status !== 'running') return
+    const winner = this.battle.wipeWinner() ?? this.winnerByFighters()
+    if (!winner) return
+    this.concluding = true
+    try {
+      this.endRound(winner)
+    } finally {
+      this.concluding = false
+    }
+  }
+
+  /** A side with nobody left standing has lost, even if the big health pool has not reached 0. */
+  private winnerByFighters(): VictoryResult | null {
+    const red = this.livingFighters('red')
+    const blue = this.livingFighters('blue')
+    if (red > 0 && blue > 0) return null
+    if (red === 0 && blue === 0) return null
+    return red > 0 ? 'red' : 'blue'
+  }
+
+  private livingFighters(team: TeamId): number {
+    let count = 0
+    for (const player of this.players.players.values()) {
+      if (player.team !== team || player.isNpc || isNpcId(player.id)) continue
+      const body = this.players.bodies.get(player.id)
+      if (!body || body.hp <= 0 || body.dying > 0) continue
+      count += 1
+    }
+    return count
   }
 
   private onNpcImpact(command: AttackCommand, tickIndex: number): number {
@@ -638,18 +826,20 @@ export class GameDirector {
     this.publish()
   }
 
-  private motionMood(): { finalTen: boolean; lead: 'red' | 'blue' | null; hidden: boolean } {
+  private motionMood(): { finalTen: boolean; lead: 'red' | 'blue' | null; hidden: boolean; settled: boolean } {
     const red = this.battle.red.score
     const blue = this.battle.blue.score
     return {
       finalTen: this.battle.phase === 'final_10',
       lead: red === blue ? null : red > blue ? 'red' : 'blue',
       hidden: typeof document !== 'undefined' && document.hidden,
+      settled: this.battle.status === 'victory',
     }
   }
 
   private tick(dt: number, now: number): void {
     this.considerRole(dt)
+    this.maybeStartNextRound()
     this.sound.followBattle(this.battle.status, this.battle.phase, this.battle.timeLeftMs, this.battle.endless)
     if (this.role === 'follow') {
       this.stepAttract(dt, now, false)
@@ -704,13 +894,9 @@ export class GameDirector {
       }
     }
 
-    if (this.battle.status === 'running') {
-      for (const item of this.gifts.flush(now)) this.resolveGift(item.event, item.count, now)
-    }
     this.stepAutoBattle(now)
 
-    const wiped = this.battle.wipeWinner()
-    if (wiped) this.endRound(wiped)
+    this.conclude()
     const signals = this.battle.tick(dt)
     if (signals.enteredRush) {
       this.setMusic('rush')
@@ -725,7 +911,14 @@ export class GameDirector {
       this.sound.observeMatch(this.battle.red.score, this.battle.blue.score, this.battle.phase, clockSecond)
     }
     if (signals.finalSecond != null) this.sound.play('countdown', (11 - signals.finalSecond) / 10)
-    if (signals.expired) this.endRound(this.battle.winnerFromScore())
+    if (
+      this.battle.status === 'victory' &&
+      !this.resultsCountdownLogged &&
+      this.battle.victoryElapsed >= 8000
+    ) {
+      this.resultsCountdownLogged = true
+      console.log('RESULTS COUNTDOWN STARTED')
+    }
     if (signals.roundOver || this.battle.status === 'resetting') this.openCountdown(true)
     this.sound.followBattle(this.battle.status, this.battle.phase, this.battle.timeLeftMs, this.battle.endless)
 
@@ -756,14 +949,53 @@ export class GameDirector {
     const score = preview ? 0 : Math.max(1, Math.round(gift.scoreValue * count * comboScoreFactor(combo.total)))
     const intensity = gift.animationIntensity * comboIntensity(combo.total)
     const player = this.players.players.get(event.userId)
+    const coins = Math.max(0, event.coinValue ?? gift.coinValue) * Math.max(1, count)
+    const power = giftPower(coins)
+    const scene = cinemaOf({ giftId: gift.id, giftName: gift.displayName, attackType: gift.attackType, rarity: gift.rarity })
+    const flight = (scene ? scene.duration * CINEMA_PACE : flightSeconds(gift.rarity, gift.attackType)) * power.pace
+    const impacts = scene ? [...scene.impacts] : attackImpacts[gift.attackType]
+    const requested = Math.max(0, Math.round(visuals) || 0)
+    const cap = scene ? 1 : gift.rarity === 'legendary' || gift.rarity === 'large' ? 6 : 8
+    const burst = Math.min(requested, cap)
+    const body = this.players.bodies.get(event.userId)
+    const from = body ?? (team === 'red' ? { x: 0.28, y: 0.5 } : { x: 0.72, y: 0.5 })
+    for (let i = 0; i < burst; i += 1) {
+      const foe = this.aim(team)
+      const spread = burst > 1 ? 0.035 : 0
+      this.launch(
+        {
+          attackType: gift.attackType,
+          team,
+          fromX: from.x,
+          fromY: from.y,
+          toX: foe.x + (Math.random() - 0.5) * spread,
+          toY: foe.y + (Math.random() - 0.5) * spread,
+          targetId: i === 0 ? foe.id : undefined,
+          intensity,
+          duration: flight,
+          damage: burst > 0 ? damage / burst : 0,
+          shake: shakeFor(gift, combo.total),
+          particleIntensity: gift.particleIntensity * comboIntensity(combo.total),
+          sound: gift.soundEffect,
+          priority: rarityPriority[gift.rarity],
+          username: event.username,
+          giftName: gift.displayName,
+          combo: combo.total,
+          rarity: gift.rarity,
+          impacts,
+          power: i === 0 ? power.size : Math.max(1.15, power.size * 0.7),
+        },
+        i * GIFT_BURST_GAP_MS,
+      )
+    }
+    this.players.powerUp(event.userId, power.growth, 0.15)
     if (!preview && player) {
-      const coins = event.coinValue ?? gift.coinValue
-      player.giftValue += coins * count
+      player.giftValue += coins
       player.giftCount += count
       player.battlePoints += score
       player.damageDealt += damage
+      player.participated = true
       player.largestCombo = Math.max(player.largestCombo, combo.total)
-      this.players.swell(event.userId, giftSwell(gift.rarity, combo.total), giftHold(gift.rarity))
     }
     if (!preview) {
       this.autoBattle.noteViewer(performance.now(), 'gift', gift.rarity)
@@ -821,51 +1053,12 @@ export class GameDirector {
       }
     }
 
-      const requested = Math.max(0, Math.round(visuals) || 0)
-      const cap = gift.rarity === 'legendary' || gift.rarity === 'large' ? 6 : 8
-      const burst = Math.min(requested, cap)
-      const heart = gift.attackType === 'heart'
-      const flight = flightSeconds(gift.rarity, gift.attackType)
-      const body = this.players.bodies.get(event.userId)
-      const from = body ?? (team === 'red' ? { x: 0.28, y: 0.5 } : { x: 0.72, y: 0.5 })
-      for (let i = 0; i < burst; i += 1) {
-        const foe = this.aim(team)
-        const spread = burst > 1 ? 0.035 : 0
-        this.launch(
-          {
-            attackType: gift.attackType,
-            team,
-            fromX: from.x,
-            fromY: from.y,
-            toX: foe.x + (Math.random() - 0.5) * spread,
-            toY: foe.y + (Math.random() - 0.5) * spread,
-            targetId: i === 0 ? foe.id : undefined,
-            intensity,
-            duration: flight,
-            damage: burst > 0 ? damage / burst : 0,
-            shake: shakeFor(gift, combo.total),
-            particleIntensity: gift.particleIntensity * comboIntensity(combo.total),
-            sound: gift.soundEffect,
-            priority: rarityPriority[gift.rarity],
-            username: event.username,
-            giftName: gift.displayName,
-            combo: combo.total,
-            rarity: gift.rarity,
-            impacts: attackImpacts[gift.attackType],
-          },
-          120 + i * (heart ? 22 : 28),
-        )
-    }
-    if (!preview && burst <= 0 && damage > 0 && this.combatOpen) {
-      this.damage.apply(team, damage, this.battle.red, this.battle.blue)
-      const winner = this.battle.wipeWinner()
-      if (winner) this.endRound(winner)
-    }
+    if (!preview && burst <= 0 && damage > 0 && this.combatOpen) this.strikeTeam(team, damage)
     this.dirty = true
   }
 
   private prepareSender(event: GiftEvent): TeamId {
-    const team = this.sideFor(event.userId, event.username, event.team)
+    const team = this.sideFor(event.userId, event.username, event.team) ?? event.team ?? 'red'
     const existing = this.players.players.get(event.userId) ?? this.playerByName(event.username)
     if (existing) {
       if (existing.team !== team && !this.isLocked(existing.id)) {
@@ -908,8 +1101,13 @@ export class GameDirector {
     return this.chosenTeams.get(`name:${name}`) ?? null
   }
 
-  private sideFor(userId: string | undefined, username: string | undefined, incoming: TeamId): TeamId {
-    return this.choiceFor(userId, username) ?? this.players.players.get(userId ?? '')?.team ?? this.playerByName(username)?.team ?? incoming
+  private isDefeated(id: string): boolean {
+    const body = this.players.bodies.get(id)
+    return !!body && (body.hp <= 0 || body.dying > 0)
+  }
+
+  private sideFor(userId: string | undefined, username: string | undefined, incoming?: TeamId): TeamId | null {
+    return this.choiceFor(userId, username) ?? this.players.players.get(userId ?? '')?.team ?? this.playerByName(username)?.team ?? incoming ?? null
   }
 
   private playerByName(username: string | undefined): { id: string; team: TeamId } | undefined {
@@ -978,40 +1176,33 @@ export class GameDirector {
 
   private spawnFollow(team: TeamId, userId: string | undefined, username: string): void {
     const origin = this.launcher(team, userId)
-    if (origin.id) {
-      this.players.boost(origin.id, 0.72, 0.95)
-      this.players.swell(origin.id, 0.24, 0.75)
-    }
     const foe = this.aim(team)
-    this.launch(
-      {
-        attackType: 'follow_blast',
-        team,
-        fromX: origin.x,
-        fromY: origin.y,
-        toX: foe.x,
-        toY: foe.y,
-        targetId: foe.id,
-        intensity: 1.2,
-        duration: 0.56,
-        damage: battleConfig.followBlastDamage,
-        shake: 'small',
-        particleIntensity: 1.15,
-        sound: 'explosion',
-        priority: 5,
-        username,
-        giftName: 'Follow',
-        combo: 1,
-        rarity: 'medium',
-        impacts: attackImpacts.follow_blast,
-      },
-      120,
-    )
+    this.launch({
+      attackType: 'follow_blast',
+      team,
+      fromX: origin.x,
+      fromY: origin.y,
+      toX: foe.x,
+      toY: foe.y,
+      targetId: foe.id,
+      intensity: 1.2,
+      duration: 0.44,
+      damage: battleConfig.followBlastDamage,
+      shake: 'small',
+      particleIntensity: 1.15,
+      sound: 'explosion',
+      priority: 5,
+      username,
+      giftName: 'Follow',
+      combo: 1,
+      rarity: 'medium',
+      impacts: attackImpacts.follow_blast,
+      power: 1.45,
+    })
   }
 
   private spawnShare(team: TeamId, userId: string | undefined, username: string): void {
     const origin = this.launcher(team, userId)
-    if (origin.id) this.players.swell(origin.id, 0.32, 0.7)
     const foe = this.aim(team)
     this.launch({
       attackType: 'share_shot',
@@ -1022,7 +1213,7 @@ export class GameDirector {
       toY: foe.y,
       targetId: foe.id,
       intensity: 1.05,
-      duration: 0.64,
+      duration: 0.5,
       damage: battleConfig.shareDamage,
       shake: 'medium',
       particleIntensity: 0.95,
@@ -1033,12 +1224,12 @@ export class GameDirector {
       combo: 1,
       rarity: 'small',
       impacts: attackImpacts.share_shot,
-    }, 110)
+      power: 1.35,
+    })
   }
 
   private spawnComment(team: TeamId, userId: string | undefined, username: string): void {
     const origin = this.launcher(team, userId)
-    if (origin.id) this.players.swell(origin.id, 0.08, 0.28)
     const foe = this.aim(team)
     const kind = COMMENT_FX[Math.floor(Math.random() * COMMENT_FX.length)] ?? 'sparkle_shot'
     this.launch({
@@ -1050,7 +1241,7 @@ export class GameDirector {
       toY: foe.y,
       targetId: foe.id,
       intensity: 0.85,
-      duration: 0.38,
+      duration: 1,
       damage: battleConfig.commentDamage,
       shake: 'none',
       particleIntensity: 0.45,
@@ -1062,6 +1253,7 @@ export class GameDirector {
       rarity: 'micro',
       impacts: attackImpacts[kind],
     })
+    if (origin.id) this.players.swell(origin.id, 0.08, 0.28)
   }
 
   private launcher(team: TeamId, userId?: string): { id: string | null; x: number; y: number } {
@@ -1088,7 +1280,7 @@ export class GameDirector {
   }
 
   private ensureOnField(userId: string | undefined, username: string, team: TeamId, avatarUrl = ''): string | undefined {
-    const existing = (userId ? this.players.players.get(userId) : undefined) ?? this.playerByName(username)
+    const existing = (userId ? this.players.players.get(userId) : undefined) ?? this.viewerByName(username)
     if (existing) {
       if (avatarUrl) this.players.refreshAvatar(existing.id, avatarUrl)
       if (existing.team !== team && !this.isLocked(existing.id)) this.players.setTeam(existing.id, team)
@@ -1104,6 +1296,7 @@ export class GameDirector {
       avatarKey: '',
       initials: initialsOf(username || 'G'),
     })
+    this.players.spotlight(id)
     this.rememberMember(id)
     return id
   }
@@ -1119,7 +1312,6 @@ export class GameDirector {
 
   private sealCombat(): void {
     this.attacks.reset()
-    this.gifts.clear()
     this.powerFlash = null
     this.powerFlashLeft = 0
     this.announcement = null
@@ -1135,9 +1327,28 @@ export class GameDirector {
     this.sealCombat()
   }
 
+  /** After a win, start the next countdown once the victory hold is over. */
+  private maybeStartNextRound(): void {
+    if (this.role !== 'lead' || this.restarting) return
+    if (this.battle.status === 'resetting') {
+      this.openCountdown(true)
+      return
+    }
+    if (this.battle.status !== 'victory') {
+      this.victoryArmedAt = 0
+      return
+    }
+    if (this.victoryArmedAt <= 0) {
+      const elapsed = Math.max(0, Math.min(battleConfig.victoryHoldMs, this.battle.victoryElapsed))
+      this.victoryArmedAt = Date.now() - elapsed
+    }
+    if (Date.now() - this.victoryArmedAt >= battleConfig.victoryHoldMs) this.openCountdown(true)
+  }
+
   private openCountdown(increment: boolean): void {
     if (this.battle.status === 'countdown' || this.restarting) return
     this.restarting = true
+    console.log('STARTING NEXT BATTLE')
     try {
       console.log('[ROUND] Resetting')
       const fromRound = this.roundNumber
@@ -1166,6 +1377,7 @@ export class GameDirector {
       this.countdownView = null
       this.previewStartedAt = 0
       this.nextRoundWall = 0
+      this.victoryArmedAt = 0
       this.epoch += 1
       if (increment && !this.roundBumped) {
         this.roundNumber += 1
@@ -1229,17 +1441,19 @@ export class GameDirector {
     })
   }
 
-  private roundLeaders(winner: VictoryResult) {
-    const ranked = this.players.leaderboard(24)
-    const pool = winner === 'draw' ? ranked : ranked.filter((entry) => entry.team === winner)
-    return pool.filter((entry) => entry.battlePoints > 0).slice(0, 3)
+  private creditViewer(id: string | undefined, points: number): void {
+    if (!id || points <= 0 || isNpcId(id)) return
+    const player = this.players.players.get(id)
+    if (!player || player.isNpc) return
+    player.participated = true
+    player.battlePoints += points
   }
 
   private portraitsFor(winner: VictoryResult): VictoryPortrait[] {
     const seen = new Set<string>()
     const portraits: VictoryPortrait[] = []
     const consider = (id: string, username: string, avatarUrl: string, team: TeamId) => {
-      if (isNpcId(id)) return
+      if (isNpcId(id) || /^p\d+$/.test(id)) return
       if (winner !== 'draw' && team !== winner) return
       if (!avatarUrl || seen.has(id) || portraits.length >= 8) return
       seen.add(id)
@@ -1254,7 +1468,6 @@ export class GameDirector {
     this.epoch += 1
     this.players.clear()
     freshRoster(this.players)
-    this.gifts.clear()
     this.attacks.reset()
     this.combos.reset()
     this.momentum.reset()
@@ -1373,7 +1586,7 @@ export class GameDirector {
     if (!this.roundId) this.publishRound(this.roundStartedAt > 0 ? this.roundStartedAt : Date.now())
     if (this.battle.status === 'running' && this.activatedRound === this.roundId) return
     this.attacks.reset()
-    this.gifts.clear()
+    this.battle.victory = null
     this.battle.red.health = this.battle.red.maxHealth
     this.battle.blue.health = this.battle.blue.maxHealth
     this.activatedRound = this.roundId
@@ -1705,7 +1918,7 @@ export class GameDirector {
     const actions = this.autoBattle.step(now, {
       running: this.battle.status === 'running',
       round: this.combatRound,
-      busy: this.announcement != null || this.powerFlashLeft > 0.05 || this.attacks.winding || this.gifts.queued > 0,
+      busy: this.announcement != null || this.powerFlashLeft > 0.05 || this.attacks.winding || this.cinemaLive,
       alive: (team) => this.livingDummies(team),
     })
     for (const action of actions) this.applyAutoAction(action)
@@ -1880,34 +2093,32 @@ function countdownStep(elapsed: number): { label: string; level: number } | null
   return { label: String(5 - index), level: index + 1 }
 }
 
+function teamLabel(team: TeamId): 'CANADA' | 'USA' {
+  return team === 'red' ? 'CANADA' : 'USA'
+}
+
+function teamFlag(team: TeamId): string {
+  return team === 'red' ? '🇨🇦' : '🇺🇸'
+}
+
 const COMMENT_FX: AttackType[] = ['sparkle_shot', 'heart', 'rose', 'ice', 'magic', 'energy_bullet']
 
-const GIFT_SWELL: Record<GiftRarity, number> = {
-  micro: 0.08,
-  small: 0.12,
-  medium: 0.15,
-  large: 0.25,
-  legendary: 0.35,
-}
-
 function flightSeconds(rarity: GiftRarity, attackType: AttackType): number {
-  if (attackType === 'heart') return 0.3
-  if (rarity === 'micro' || rarity === 'small') return 0.34
-  if (rarity === 'medium') return 0.46
-  if (rarity === 'large') return 0.66
-  return 0.68
+  if (attackType === 'black_hole') return 0.95
+  if (attackType === 'meteor' || attackType === 'dragon') return 0.86
+  if (attackType === 'firestorm' || attackType === 'thunderstorm' || attackType === 'laser' || attackType === 'sword' || attackType === 'tornado') return 0.76
+  if (attackType === 'cosmic' || attackType === 'airstrike' || attackType === 'lightning' || attackType === 'fire_blast') return 0.68
+  if (rarity === 'large') return 0.6
+  if (rarity === 'medium') return 0.48
+  if (rarity === 'small') return 0.68
+  return 0.66
 }
 
-function giftSwell(rarity: GiftRarity, combo: number): number {
-  return GIFT_SWELL[rarity] + Math.min(0.06, Math.max(0, combo - 1) * 0.008)
-}
-
-function giftHold(rarity: GiftRarity): number {
-  if (rarity === 'legendary') return 0.62
-  if (rarity === 'large') return 0.5
-  if (rarity === 'medium') return 0.42
-  if (rarity === 'small') return 0.36
-  return 0.32
+function hitPointEach(command: { damage: number; impacts: number[]; ambient?: boolean }, people: number): number {
+  const portion = Math.max(0, command.damage) / Math.max(1, command.impacts.length)
+  const share = Math.round(portion / Math.max(1, people))
+  if (command.ambient) return Math.max(1, share)
+  return Math.max(3, share)
 }
 
 function avatarHit(command: AttackCommand): number {

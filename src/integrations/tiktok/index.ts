@@ -1,4 +1,3 @@
-import { postBattle } from '../../systems/BattleSync.ts'
 import { director } from '../../systems/GameDirector.ts'
 import type { TikTokAdapter } from './TikTokAdapter.ts'
 import type { TikTokLiveEvent } from './TikTokEventTypes.ts'
@@ -41,35 +40,7 @@ export function handleTikTokComment(event: CommentReceivedEvent): void {
 }
 
 export function dispatchTikTokEvent(event: TikTokLiveEvent): void {
-  if (!director.leading) {
-    postBattle({ type: 'event', event })
-    return
-  }
-  switch (event.type) {
-    case 'viewerJoined':
-      handleTikTokJoin(event.payload)
-      break
-    case 'viewerLeft':
-      handleTikTokLeave(event.payload)
-      break
-    case 'likeReceived':
-      handleTikTokLike(event.payload)
-      break
-    case 'followReceived':
-      handleTikTokFollow(event.payload)
-      break
-    case 'shareReceived':
-      handleTikTokShare(event.payload)
-      break
-    case 'commentReceived':
-      handleTikTokComment(event.payload)
-      break
-    case 'giftReceived':
-      handleTikTokGift(event.payload)
-      break
-    default:
-      break
-  }
+  director.receiveLive(event)
 }
 
 export function attachTikTokAdapter(adapter: TikTokAdapter): () => void {

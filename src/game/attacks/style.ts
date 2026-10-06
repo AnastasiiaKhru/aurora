@@ -16,13 +16,13 @@ export type AttackStyle =
 export type AttackTier = 'micro' | 'small' | 'medium' | 'large' | 'legendary'
 
 export const temporaryAttackScale = {
-  like: 1.08,
-  follow: 1.18,
-  share: 1.22,
-  smallGift: 1.16,
-  mediumGift: 1.28,
-  largeGift: 1.4,
-  legendaryGift: 1.5,
+  like: 1.42,
+  follow: 1.62,
+  share: 1.68,
+  smallGift: 1.66,
+  mediumGift: 1.85,
+  largeGift: 2.08,
+  legendaryGift: 2.28,
 } as const
 
 export interface StyleSpec {

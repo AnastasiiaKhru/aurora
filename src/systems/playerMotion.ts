@@ -1,16 +1,16 @@
-import { AVATAR_BASE, DESIGN_HEIGHT, DESIGN_WIDTH, GAMEPLAY_END, MAX_PLAYER_Y, MIN_PLAYER_Y, permanentAvatarDiameter } from '../broadcast/stage.ts'
+import { AVATAR_BASE, DESIGN_HEIGHT, DESIGN_WIDTH, GAMEPLAY_END, GAMEPLAY_START, MAX_PLAYER_Y, MIN_PLAYER_Y, permanentAvatarDiameter } from '../broadcast/stage.ts'
 import type { PlayerBody } from './PlayerSystem.ts'
 import type { TeamId } from '../types/Team.ts'
 import { clamp, hashString } from '../utils/math.ts'
 
-const ROAM_SPEED = 1.25
+const ROAM_SPEED = 2.15
 const EDGE_PAD = 16
 const CENTER_GAP = 28
 const CELL = 180
 const VISIBLE_CAP = 12
 
 const playfield = {
-  safeTop: MIN_PLAYER_Y,
+  safeTop: GAMEPLAY_START + 20,
   safeBottom: GAMEPLAY_END - 20,
 }
 
@@ -35,12 +35,17 @@ export interface MotionMood {
   finalTen: boolean
   lead: TeamId | null
   hidden: boolean
+  settled?: boolean
 }
 
 export interface MotionEntry {
   body: PlayerBody
   username: string
   points: number
+  /** A real TikTok viewer rather than a generated field filler. */
+  real?: boolean
+  /** Just joined or switched sides; must be on screen right away. */
+  fresh?: boolean
 }
 
 let reduceMedia = false
@@ -85,7 +90,7 @@ export function teamBox(team: TeamId, _attacking = false, radius = AVATAR_BASE /
   const mid = DESIGN_WIDTH / 2
   const room = mid - CENTER_GAP - EDGE_PAD
   const r = Math.max(12, Math.min(radius, Math.max(12, room / 2 - 8)))
-  const boundaryTop = Math.max(MIN_PLAYER_Y, playfield.safeTop)
+  const boundaryTop = Math.max(GAMEPLAY_START + 12, playfield.safeTop)
   const boundaryBottom = Math.min(GAMEPLAY_END - 20, MAX_PLAYER_Y + r)
   let y0 = boundaryTop + r
   let y1 = Math.min(MAX_PLAYER_Y, boundaryBottom - r)
@@ -180,6 +185,10 @@ function assignVisible(entries: MotionEntry[]): MotionEntry[] {
   for (const team of ['red', 'blue'] as const) {
     const side = entries.filter((entry) => entry.body.team === team && entry.body.dying <= 0 && entry.body.hp > 0)
     side.sort((a, b) => {
+      const fresh = (b.fresh ? 1 : 0) - (a.fresh ? 1 : 0)
+      if (fresh !== 0) return fresh
+      const real = (b.real ? 1 : 0) - (a.real ? 1 : 0)
+      if (real !== 0) return real
       const pose = (b.body.poseMode > 0 ? 1 : 0) - (a.body.poseMode > 0 ? 1 : 0)
       if (pose !== 0) return pose
       if (b.points !== a.points) return b.points - a.points
@@ -200,6 +209,17 @@ function steer(entry: MotionEntry, dt: number, time: number, reduced: boolean, l
   const body = entry.body
   body.cheer = Math.max(0, body.cheer - dt)
   body.stun = Math.max(0, body.stun - dt)
+  if (mood.settled) {
+    body.ultPhase = 0
+    body.vx *= Math.exp(-dt * 14)
+    body.vy *= Math.exp(-dt * 14)
+    body.trail = 0
+    return
+  }
+  if ((body.ultPhase || 0) > 0) {
+    steerUltimate(body, dt)
+    return
+  }
   if (body.poseMode === 2) body.lunge = Math.max(body.lunge, 0.45)
   else body.lunge = Math.max(0, body.lunge - dt)
   const state = pickState(body)
@@ -213,7 +233,7 @@ function steer(entry: MotionEntry, dt: number, time: number, reduced: boolean, l
 
   const box = teamBox(body.team, false, body.motionR)
   const mates = teammates(shown, body)
-  const cruise = (body.speed >= 20 ? body.speed : 34) * ROAM_SPEED * (leader ? 0.92 : 1) * (reduced ? 0.45 : 1) * (state === 'stunned' ? 0.55 : 1) * (mood.finalTen && mood.lead === body.team ? 1.12 : 1)
+  const cruise = (body.speed >= 20 ? body.speed : 34) * ROAM_SPEED * (leader ? 0.92 : 1) * (reduced ? 0.45 : 1) * (state === 'stunned' ? 0.55 : 1) * (mood.finalTen && mood.lead === body.team ? 1.12 : 1) * (mood.settled ? 0.22 : 1)
   ensureTarget(body, box, mates)
   const px = body.x * DESIGN_WIDTH
   const py = body.y * DESIGN_HEIGHT
@@ -236,8 +256,8 @@ function steer(entry: MotionEntry, dt: number, time: number, reduced: boolean, l
   const nx = dist > 0.001 ? dx / dist : 1
   const ny = dist > 0.001 ? dy / dist : 0
   const ease = dist < arrive ? 0.62 + 0.38 * (dist / arrive) : 1
-  const omega = 0.55 + (body.persona % 7) * 0.13
-  const sway = Math.sin(time * omega + body.phase) * (6 + (body.curve > 0 ? body.curve : 6) * 0.85)
+  const omega = 0.8 + (body.persona % 7) * 0.18
+  const sway = Math.sin(time * omega + body.phase) * (11 + (body.curve > 0 ? body.curve : 6) * 1.15)
   const spread = spreadFromMates(px, py, body.motionR, mates)
   let desiredVx = nx * cruise * ease - ny * sway + spread.x
   let desiredVy = ny * cruise * ease + nx * sway + spread.y
@@ -245,7 +265,7 @@ function steer(entry: MotionEntry, dt: number, time: number, reduced: boolean, l
   if (body.poseMode === 2) desiredVx += sign * 32
   else if (body.poseMode === 3) desiredVx -= sign * 24
 
-  const accel = (110 + (body.persona % 5) * 16) * (reduced ? 0.65 : 1)
+  const accel = (155 + (body.persona % 5) * 18) * (reduced ? 0.65 : 1)
   let dvx = desiredVx - body.vx
   let dvy = desiredVy - body.vy
   const dv = Math.hypot(dvx, dvy)
@@ -280,8 +300,63 @@ function steer(entry: MotionEntry, dt: number, time: number, reduced: boolean, l
   if (state === 'celebrate') body.spin = Math.min(1.15, body.spin + dt * 1.6)
 }
 
+function steerUltimate(body: PlayerBody, dt: number): void {
+  const phase = body.ultPhase || 0
+  body.motion = phase === 1 ? 'charge' : phase === 4 ? 'recoil' : 'attack'
+  const sign = body.team === 'red' ? 1 : -1
+  const leanTarget = sign * (phase === 4 ? 0.04 : 0.18)
+  body.lean += (leanTarget - body.lean) * Math.min(1, dt * 8)
+  body.trail = motionReduced() ? 0 : clamp(body.ultTrail || 0, 0, 1)
+  if (phase === 3 && (body.ultMove === 1 || body.ultMove === 2)) {
+    body.vx *= 0.45
+    body.vy *= 0.45
+    return
+  }
+  if (phase === 1 || (phase === 3 && body.ultMove === 0)) {
+    body.vx *= Math.exp(-dt * 8)
+    body.vy *= Math.exp(-dt * 8)
+    return
+  }
+  const speed = (body.speed >= 20 ? body.speed : 34) * (body.ultSpeed || 1)
+  const tx = (phase === 4 ? body.ultHomeX : body.ultStrikeX) * DESIGN_WIDTH
+  const ty = (phase === 4 ? body.ultHomeY : body.ultStrikeY) * DESIGN_HEIGHT
+  seek(body, tx, ty, speed, dt)
+}
+
+function seek(body: PlayerBody, tx: number, ty: number, speed: number, dt: number): void {
+  const px = body.x * DESIGN_WIDTH
+  const py = body.y * DESIGN_HEIGHT
+  const dx = tx - px
+  const dy = ty - py
+  const dist = Math.hypot(dx, dy)
+  if (dist < 6) {
+    body.vx *= 0.82
+    body.vy *= 0.82
+    return
+  }
+  const pace = Math.min(speed, dist / Math.max(0.016, dt))
+  body.vx += ((dx / dist) * pace - body.vx) * Math.min(1, dt * 12)
+  body.vy += ((dy / dist) * pace - body.vy) * Math.min(1, dt * 12)
+  limitSpeed(body, pace)
+}
+
 function advance(entry: MotionEntry, dt: number): void {
   const body = entry.body
+  if (body.ultPhase === 3 && (body.ultMove === 1 || body.ultMove === 2)) {
+    const blend = clamp(body.ultDash || 0, 0, 1)
+    const nx = body.ultHomeX + (body.ultStrikeX - body.ultHomeX) * blend
+    const ny = body.ultHomeY + (body.ultStrikeY - body.ultHomeY) * blend
+    const prevX = body.x
+    const prevY = body.y
+    body.x = nx
+    body.y = ny
+    const step = Math.max(0.016, dt)
+    body.vx = ((nx - prevX) * DESIGN_WIDTH) / step
+    body.vy = ((ny - prevY) * DESIGN_HEIGHT) / step
+    body.trail = motionReduced() ? 0 : 1
+    pushEcho(body)
+    return
+  }
   const box = teamBox(body.team, false, body.motionR)
   let px = body.x * DESIGN_WIDTH + body.vx * dt
   let py = body.y * DESIGN_HEIGHT + body.vy * dt
@@ -296,6 +371,7 @@ function advance(entry: MotionEntry, dt: number): void {
   const pace = Math.hypot(body.vx, body.vy)
   body.trail = motionReduced() ? 0 : clamp((pace - 22) / 90, 0, 1)
   body.lean += (clamp(body.vx / 240, -0.16, 0.16) - body.lean) * Math.min(1, dt * 6)
+  pushEcho(body)
 }
 
 function limitSpeed(body: PlayerBody, max: number): void {
@@ -329,7 +405,7 @@ function retarget(body: PlayerBody, box: Box, mates: Point[]): { x: number; y: n
   body.aimX = goal.x / DESIGN_WIDTH
   body.aimY = goal.y / DESIGN_HEIGHT
   const seed = hashString(`${body.id}:${body.goalSerial}:leg`)
-  body.goalWait = 3.4 + (seed % 220) / 100
+  body.goalWait = 0.62 + (seed % 80) / 100
   return goal
 }
 
@@ -355,7 +431,7 @@ function spreadFromMates(px: number, py: number, radius: number, mates: Point[])
     let dx = px - mate.x
     let dy = py - mate.y
     let dist = Math.hypot(dx, dy)
-    const comfort = Math.min(168, (radius + mate.r) * 1.35 + 34)
+    const comfort = Math.min(210, (radius + mate.r) * 1.62 + 42)
     if (dist >= comfort) continue
     if (dist < 0.001) {
       dx = ((hashString(`${px}:${py}`) % 7) - 3) || 1
@@ -376,19 +452,15 @@ function spreadFromMates(px: number, py: number, radius: number, mates: Point[])
 }
 
 function territory(body: PlayerBody, x0: number, y0: number, spanX: number, spanY: number): Box {
-  const cols = 3
-  const rows = 2
-  const slot = (hashString(`${body.id}:territory`) + Math.floor(body.goalSerial / 2)) % (cols * rows)
-  const col = slot % cols
-  const row = Math.floor(slot / cols)
-  const bleed = 0.34
-  const cellW = spanX / cols
-  const cellH = spanY / rows
+  const hx = clamp((body.homeX || 0.5) * DESIGN_WIDTH, x0, x0 + spanX)
+  const hy = clamp((body.homeY || 0.5) * DESIGN_HEIGHT, y0, y0 + spanY)
+  const reachX = Math.max(48, spanX * 0.2)
+  const reachY = Math.max(42, spanY * 0.18)
   return {
-    x0: clamp(x0 + col * cellW - cellW * bleed, x0, x0 + spanX),
-    x1: clamp(x0 + (col + 1) * cellW + cellW * bleed, x0, x0 + spanX),
-    y0: clamp(y0 + row * cellH - cellH * bleed, y0, y0 + spanY),
-    y1: clamp(y0 + (row + 1) * cellH + cellH * bleed, y0, y0 + spanY),
+    x0: clamp(hx - reachX, x0, x0 + spanX),
+    x1: clamp(hx + reachX, x0, x0 + spanX),
+    y0: clamp(hy - reachY, y0, y0 + spanY),
+    y1: clamp(hy + reachY, y0, y0 + spanY),
   }
 }
 
@@ -409,16 +481,15 @@ function pickGoal(body: PlayerBody, box: Box, mates: Point[]): { x: number; y: n
   const px = body.x * DESIGN_WIDTH
   const py = body.y * DESIGN_HEIGHT
   const minTravel = Math.min(170, Math.max(64, Math.min(spanX, spanY) * 0.22))
-  let best = { x: clamp(px, x0, x1), y: clamp(py, y0, y1) }
+  let best = { x: clamp((zone.x0 + zone.x1) / 2, x0, x1), y: clamp((zone.y0 + zone.y1) / 2, y0, y1) }
   let bestScore = -1
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const local = attempt < 6
-    const x = local ? zone.x0 + Math.random() * zoneW : x0 + Math.random() * spanX
-    const y = local ? zone.y0 + Math.random() * zoneH : y0 + Math.random() * spanY
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const x = zone.x0 + Math.random() * zoneW
+    const y = zone.y0 + Math.random() * zoneH
     const travel = Math.hypot(x - px, y - py)
     let nearest = Math.min(spanX, spanY)
     for (const mate of mates) nearest = Math.min(nearest, Math.hypot(x - mate.x, y - mate.y))
-    const score = nearest * 1.25 + travel * 0.22 + (travel >= minTravel ? 28 : 0) + (local ? 36 : 0)
+    const score = nearest * 1.45 + Math.min(travel, minTravel) * 0.22
     if (score > bestScore) {
       bestScore = score
       best = { x, y }
@@ -458,7 +529,7 @@ function separate(shown: MotionEntry[]): void {
             let dx = bx - ax
             let dy = by - ay
             let dist = Math.hypot(dx, dy)
-            const touch = a.motionR + b.motionR
+            const touch = a.motionR + b.motionR + 14
             if (dist >= touch) continue
             if (dist < 0.001) {
               dx = ((hashString(a.id) % 7) - 3) || 1
@@ -467,7 +538,7 @@ function separate(shown: MotionEntry[]): void {
             }
             const nx = dx / dist
             const ny = dy / dist
-            const slide = Math.min(0.8, (touch - dist) * 0.045)
+            const slide = Math.min(2.4, (touch - dist) * 0.11)
             a.x -= (nx * slide) / DESIGN_WIDTH
             a.y -= (ny * slide) / DESIGN_HEIGHT
             b.x += (nx * slide) / DESIGN_WIDTH
@@ -479,8 +550,37 @@ function separate(shown: MotionEntry[]): void {
   }
 }
 
+function pushEcho(body: PlayerBody): void {
+  if (!body.echoX || !body.echoY) {
+    body.echoX = []
+    body.echoY = []
+  }
+  const hot = (body.ultTrail || 0) > 0.2 || (body.trail || 0) > 0.55
+  if (!hot || motionReduced()) {
+    if (body.echoX.length > 0) {
+      body.echoX.shift()
+      body.echoY.shift()
+    }
+    return
+  }
+  body.echoX.push(body.x)
+  body.echoY.push(body.y)
+  if (body.echoX.length > 5) {
+    body.echoX.shift()
+    body.echoY.shift()
+  }
+}
+
 function clampBody(body: PlayerBody): void {
   const radius = Math.max(12, body.motionR || AVATAR_BASE / 2)
+  if (body.ultPhase === 3 && body.ultMove === 1) {
+    const yBox = teamBox(body.team, false, radius)
+    const px = clamp(body.x * DESIGN_WIDTH, EDGE_PAD + radius, DESIGN_WIDTH - EDGE_PAD - radius)
+    const py = clamp(body.y * DESIGN_HEIGHT, yBox.y0, yBox.y1)
+    body.x = px / DESIGN_WIDTH
+    body.y = py / DESIGN_HEIGHT
+    return
+  }
   const box = teamBox(body.team, false, radius)
   body.x = clamp(body.x * DESIGN_WIDTH, box.x0, box.x1) / DESIGN_WIDTH
   body.y = clamp(body.y * DESIGN_HEIGHT, box.y0, box.y1) / DESIGN_HEIGHT
@@ -496,7 +596,7 @@ function radiusFor(body: PlayerBody, leader: boolean): number {
 
 export function driftFromCharger(shown: MotionEntry[], dt = 1 / 60): void {
   for (const team of ['red', 'blue'] as const) {
-    const charger = shown.find((entry) => entry.body.team === team && entry.body.poseMode >= 1 && entry.body.posePeak > 1.25)
+    const charger = shown.find((entry) => entry.body.team === team && ((entry.body.poseMode >= 1 && entry.body.posePeak > 1.25) || ((entry.body.ultPhase || 0) >= 1 && (entry.body.ultScale || 1) > 1.25)))
     if (!charger) continue
     const cx = charger.body.x * DESIGN_WIDTH
     const cy = charger.body.y * DESIGN_HEIGHT

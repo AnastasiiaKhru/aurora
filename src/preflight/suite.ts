@@ -74,13 +74,17 @@ export function checkJoin(): LogicResult {
   const expect: Array<[string, TeamId | null]> = [
     ['C', 'red'],
     ['c', 'red'],
-    ['canada', 'red'],
-    [' Canada ', 'red'],
+    [' C ', 'red'],
+    ['Canada', 'red'],
+    ['CANADA', 'red'],
     ['U', 'blue'],
     ['u', 'blue'],
+    [' U ', 'blue'],
     ['usa', 'blue'],
-    ['u.s.a.', 'blue'],
-    ['united states', 'blue'],
+    ['USA', 'blue'],
+    ['USA!!!', null],
+    ['cute', null],
+    ['cool', null],
     ['go canada', null],
     ['see you', null],
     ['c u later', null],
@@ -93,35 +97,32 @@ export function checkJoin(): LogicResult {
     if (team == null && action.type !== 'comment') errors.push(`${JSON.stringify(text)} joined`)
     if (team != null && (action.type !== 'join' || action.team !== team)) errors.push(`${JSON.stringify(text)} did not join ${team}`)
   }
-  const locks = new Set<string>()
   const players = new PlayerSystem()
   const join = (id: string, preferred: TeamId, explicit: boolean) => {
     const existing = players.players.get(id) ?? null
-    const decision = decideJoin(existing, preferred, explicit, locks.has(id))
-    if (decision === 'create') {
-      players.add({ id, username: id, team: preferred, avatarUrl: '', avatarKey: '', initials: 'A' })
-      if (explicit) locks.add(id)
-    } else if (decision === 'switch' && existing) {
-      players.setTeam(id, preferred)
-      locks.add(id)
-    }
+    const decision = decideJoin(existing, preferred, explicit)
+    if (decision === 'create') players.add({ id, username: id, team: preferred, avatarUrl: '', avatarKey: '', initials: 'A' })
+    else if (decision === 'switch' && existing) players.setTeam(id, preferred)
     return decision
   }
+  const sides = () => [...players.players.values()].filter((player) => player.id === 'ana').map((player) => player.team)
   if (join('ana', 'red', true) !== 'create') errors.push('first join did not create')
   if (players.players.size !== 1) errors.push('duplicate player record')
   if (join('ana', 'red', true) !== 'keep') errors.push('active player created a second circle')
   if (players.players.size !== 1) errors.push('second join duplicated the circle')
-  if (join('ana', 'blue', true) !== 'keep') errors.push('locked player switched teams')
-  if (players.players.get('ana')?.team !== 'red') errors.push('team changed while active')
+  if (join('ana', 'blue', false) !== 'keep') errors.push('implicit event moved a player')
+  if (join('ana', 'blue', true) !== 'switch') errors.push('typed U did not switch a Canada player')
+  if (sides().join() !== 'blue' || players.bodies.size !== 1) errors.push('switched player is not only on USA')
+  if (join('ana', 'red', true) !== 'switch') errors.push('typed C did not switch a USA player back')
+  if (sides().join() !== 'red' || players.bodies.size !== 1) errors.push('switched player is not only on Canada')
   players.strike('ana', 10_000)
   for (let frame = 0; frame < 40; frame += 1) players.update(0.05, frame)
   if (players.players.has('ana')) errors.push('eliminated player stayed on the field')
-  locks.delete('ana')
   if (join('ana', 'blue', true) !== 'create') errors.push('eliminated player could not rejoin')
   const rejoined = players.players.get('ana')
   if (!rejoined || rejoined.team !== 'blue' || rejoined.battlePoints !== 0) errors.push('rejoin kept old state')
   if (players.bodies.size !== 1) errors.push('rejoin duplicated a body')
-  return { id: 'join', status: fail(errors), detail: errors[0] ?? 'Chat commands, locks, and rejoin passed' }
+  return { id: 'join', status: fail(errors), detail: errors[0] ?? 'Chat commands, team switches, and rejoin passed' }
 }
 
 export function checkInteractions(): LogicResult {

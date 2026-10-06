@@ -19,7 +19,7 @@ export interface LikeReceivedEvent {
   userId: string
   username: string
   avatarUrl: string
-  team: TeamId
+  team?: TeamId
   count: number
   eventId?: string
 }
@@ -28,7 +28,7 @@ export interface FollowReceivedEvent {
   userId: string
   username: string
   avatarUrl: string
-  team: TeamId
+  team?: TeamId
   eventId?: string
 }
 
@@ -36,7 +36,7 @@ export interface ShareReceivedEvent {
   userId: string
   username: string
   avatarUrl: string
-  team: TeamId
+  team?: TeamId
   eventId?: string
 }
 
@@ -52,7 +52,7 @@ export interface GiftReceivedEvent {
   userId: string
   username: string
   avatarUrl: string
-  team: TeamId
+  team?: TeamId
   giftId: string
   giftName: string
   giftCount: number

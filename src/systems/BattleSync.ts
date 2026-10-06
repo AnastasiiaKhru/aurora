@@ -124,17 +124,22 @@ export function postBattle(message: BattleMessage): void {
   post(message)
 }
 
+let sharedChannel: BroadcastChannel | null = null
+
+function battleBus(): BroadcastChannel | null {
+  if (typeof BroadcastChannel === 'undefined') return null
+  if (!sharedChannel) sharedChannel = new BroadcastChannel(CHANNEL_NAME)
+  return sharedChannel
+}
+
 export function subscribeBattle(listener: Listener): () => void {
   if (typeof window === 'undefined') return () => undefined
-  let channel: BroadcastChannel | null = null
   const onMessage = (event: MessageEvent<BattleMessage>) => {
     if (!event.data || typeof event.data !== 'object') return
     listener(event.data)
   }
-  if (typeof BroadcastChannel !== 'undefined') {
-    channel = new BroadcastChannel(CHANNEL_NAME)
-    channel.addEventListener('message', onMessage)
-  }
+  const channel = battleBus()
+  channel?.addEventListener('message', onMessage)
   const onStorage = (event: StorageEvent) => {
     if (event.key !== STATE_KEY || !event.newValue) return
     try {
@@ -147,16 +152,12 @@ export function subscribeBattle(listener: Listener): () => void {
   window.addEventListener('storage', onStorage)
   return () => {
     channel?.removeEventListener('message', onMessage)
-    channel?.close()
     window.removeEventListener('storage', onStorage)
   }
 }
 
 function post(message: BattleMessage): void {
-  if (typeof BroadcastChannel === 'undefined') return
-  const channel = new BroadcastChannel(CHANNEL_NAME)
-  channel.postMessage(message)
-  channel.close()
+  battleBus()?.postMessage(message)
 }
 
 function readJson<T>(key: string, guard: (value: unknown) => value is T): T | null {

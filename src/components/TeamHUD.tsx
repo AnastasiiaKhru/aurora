@@ -1,21 +1,39 @@
 import { useEffect, useRef, useState } from 'react'
 import { battleConfig } from '../config/battleConfig.ts'
-import type { TeamState } from '../types/Team.ts'
+import { director } from '../systems/GameDirector.ts'
+import { teamHealthBar, teamHealthPercent } from '../systems/BattleSystem.ts'
+import { isNpcId } from '../systems/attractMode.ts'
+import type { TeamId, TeamState } from '../types/Team.ts'
 import { formatScore } from '../utils/format.ts'
 import { useAnimatedNumber } from './useAnimatedNumber.ts'
 
-export function TeamHUD({ team, side, share }: { team: TeamState; side: 'left' | 'right'; share: number }) {
+export function TeamHUD({ team, side }: { team: TeamState; side: 'left' | 'right' }) {
   const score = useAnimatedNumber(team.score)
-  const health = team.maxHealth <= 0 ? 0 : Math.max(0, Math.min(100, (team.health / team.maxHealth) * 100))
+  const plate = fighterPlate(team.id)
+  const teamBar = teamHealthBar(team.health, team.maxHealth)
+  const teamShown = teamHealthPercent(team.health, team.maxHealth)
+  const health = plate ? Math.min(teamBar, plate.bar) : teamBar
+  const shown = plate ? Math.min(teamShown, plate.shown) : teamShown
   const pips = Math.round(team.momentum * 5)
   const [scorePulse, setScorePulse] = useState(false)
+  const [hurt, setHurt] = useState(false)
   const [ghost, setGhost] = useState(health)
+  const [delta, setDelta] = useState(0)
   const ghostRef = useRef(health)
+  const scoreRef = useRef(team.score)
 
   useEffect(() => {
+    const gained = Math.round(team.score - scoreRef.current)
+    scoreRef.current = team.score
     setScorePulse(true)
     const timer = window.setTimeout(() => setScorePulse(false), 280)
-    return () => window.clearTimeout(timer)
+    if (gained <= 0) return () => window.clearTimeout(timer)
+    setDelta(gained)
+    const fade = window.setTimeout(() => setDelta(0), 720)
+    return () => {
+      window.clearTimeout(timer)
+      window.clearTimeout(fade)
+    }
   }, [team.score])
 
   useEffect(() => {
@@ -24,24 +42,35 @@ export function TeamHUD({ team, side, share }: { team: TeamState; side: 'left' |
       setGhost(health)
       return
     }
+    setHurt(true)
+    const flash = window.setTimeout(() => setHurt(false), 320)
     const timer = window.setTimeout(() => {
       ghostRef.current = health
       setGhost(health)
-    }, 280)
-    return () => window.clearTimeout(timer)
+    }, 300)
+    return () => {
+      window.clearTimeout(flash)
+      window.clearTimeout(timer)
+    }
   }, [health])
 
   return (
-    <section className={`team-hud team-${team.id} side-${side}`} aria-label={`${battleConfig.teamNames[team.id]} team`}>
+    <section className={`team-hud team-${team.id} side-${side}${hurt ? ' hurt' : ''}`} aria-label={`${battleConfig.teamNames[team.id]} team`}>
       <div className="team-name">
-        <span className="team-flag" aria-hidden="true">{team.id === 'red' ? <img src="/maple-leaf.png" alt="" /> : <UsaStar />}</span>
+        <span className="team-flag" aria-hidden="true">{team.id === 'red' ? <img src="/maple-leaf.png" alt="" /> : <UsaFlag />}</span>
         <span>{battleConfig.teamNames[team.id]}</span>
       </div>
-      <div className={`team-score${scorePulse ? ' hit' : ''}`}>{share}%</div>
-      <div className="team-points">{formatScore(score)}</div>
+      <div className={`team-score${scorePulse || hurt ? ' hit' : ''}`}>{shown}%</div>
       <div className="territory" title="Territory strength">
         <div className="territory-ghost" style={{ width: `${ghost}%` }} />
-        <div className="territory-fill" style={{ width: `${health}%` }} />
+        <div className="territory-fill" style={{ width: `${health}%` }}>
+          <i className="territory-glint" />
+        </div>
+      </div>
+      <div className="team-attack" aria-label={`${battleConfig.teamNames[team.id]} attack total`}>
+        <span className="bolt" aria-hidden="true">⚡</span>
+        <span className="team-points">{formatScore(score)}</span>
+        {delta > 0 && <em className="score-delta">+{formatScore(delta)}</em>}
       </div>
       <div className="team-meta">
         <span className="fighters">{team.playerCount}</span>
@@ -55,10 +84,33 @@ export function TeamHUD({ team, side, share }: { team: TeamState; side: 'left' |
   )
 }
 
-function UsaStar() {
+/** Plate percent follows the fighters still standing, so it leaves 100 as soon as that side is hit. */
+function fighterPlate(teamId: TeamId): { shown: number; bar: number } | null {
+  const roster = teamId === 'red' ? battleConfig.rosterRed : battleConfig.rosterBlue
+  let hp = 0
+  let counted = 0
+  for (const player of director.players.players.values()) {
+    if (player.team !== teamId || player.isNpc || isNpcId(player.id)) continue
+    counted += 1
+    const body = director.players.bodies.get(player.id)
+    if (!body || body.hp <= 0 || body.dying > 0) continue
+    hp += body.hp
+  }
+  const slots = Math.max(roster, counted)
+  if (slots <= 0) return null
+  const max = slots * battleConfig.playerHealth
+  return { shown: teamHealthPercent(hp, max), bar: teamHealthBar(hp, max) }
+}
+
+function UsaFlag() {
   return (
-    <svg viewBox="0 0 16 16" aria-hidden="true">
-      <path fill="currentColor" d="M8 1.2 9.7 5.4 14.2 5.7 10.8 8.6 11.9 13 8 10.7 4.1 13 5.2 8.6 1.8 5.7 6.3 5.4 8 1.2z" />
+    <svg viewBox="0 0 16 11" aria-hidden="true">
+      <rect width="16" height="11" rx="1.2" fill="#b22234" />
+      <rect y="1.6" width="16" height="1.15" fill="#fff" />
+      <rect y="3.9" width="16" height="1.15" fill="#fff" />
+      <rect y="6.2" width="16" height="1.15" fill="#fff" />
+      <rect y="8.5" width="16" height="1.15" fill="#fff" />
+      <rect width="7.1" height="5.9" fill="#3c3b6e" />
     </svg>
   )
 }

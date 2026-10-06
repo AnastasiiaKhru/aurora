@@ -3,11 +3,13 @@ import { battleConfig } from '../config/battleConfig.ts'
 import { ensureMotionFields, stepPlayerMotion, teamBox, type MotionMood, type PlayerMotionState } from './playerMotion.ts'
 import type { LeaderboardEntry, Player } from '../types/Player.ts'
 import type { TeamId } from '../types/Team.ts'
-import { isNpcId } from './attractMode.ts'
+import { isGeneratedId, isNpcId } from './attractMode.ts'
 import { claimDummyAvatar, isRemoteAvatar, releaseDummyAvatar, resetDummyAvatars } from '../utils/avatar.ts'
 import { initialsOf } from '../utils/format.ts'
-import { hashString } from '../utils/math.ts'
+import { clamp, hashString } from '../utils/math.ts'
 import { releaseName, resetNames, takeName } from '../utils/names.ts'
+
+const SPOTLIGHT_SECONDS = 15
 
 export interface PlayerBody {
   id: string
@@ -68,6 +70,29 @@ export interface PlayerBody {
   lunge: number
   speed: number
   curve: number
+  ultPhase: number
+  ultScale: number
+  ultMul: number
+  ultMulVel: number
+  ultSpeed: number
+  ultMove: number
+  ultDash: number
+  ultTrail: number
+  ultJitter: number
+  ultHomeX: number
+  ultHomeY: number
+  ultStrikeX: number
+  ultStrikeY: number
+  ultLeft: number
+  ultToken: number
+  echoX: number[]
+  echoY: number[]
+  /** Temporary gift power-up: current circle multiplier, its target and how long the target holds. */
+  giftMul: number
+  giftPeak: number
+  giftHold: number
+  /** Seconds a just-joined or just-switched viewer is guaranteed a visible circle, even on a full side. */
+  spotlight: number
 }
 
 interface Bounds {
@@ -210,6 +235,27 @@ export class PlayerSystem {
       lunge: 0,
       speed: 0,
       curve: 0,
+      ultPhase: 0,
+      ultScale: 1,
+      ultMul: 1,
+      ultMulVel: 0,
+      ultSpeed: 1,
+      ultMove: 0,
+      ultDash: 0,
+      ultTrail: 0,
+      ultJitter: 0,
+      ultHomeX: 0,
+      ultHomeY: 0,
+      ultStrikeX: 0,
+      ultStrikeY: 0,
+      ultLeft: 0,
+      ultToken: 0,
+      echoX: [],
+      echoY: [],
+      giftMul: 1,
+      giftPeak: 1,
+      giftHold: 0,
+      spotlight: 0,
     }
     ensureMotionFields(body, player.username)
     this.players.set(player.id, player)
@@ -329,7 +375,9 @@ export class PlayerSystem {
       body.crack = Math.max(0, body.crack - step * 0.7)
       body.frost = Math.max(0, body.frost - step * 0.65)
       this.stepPose(body, step)
-      entries.push({ body, username: player?.username ?? body.id, points: player?.battlePoints ?? 0 })
+      body.spotlight = Math.max(0, body.spotlight - step)
+      const real = !!player && (player.participated === true || (!player.isNpc && !isNpcId(player.id) && !isGeneratedId(player.id)))
+      entries.push({ body, username: player?.username ?? body.id, points: player?.battlePoints ?? 0, real, fresh: body.spotlight > 0 })
     }
     this.reserves = stepPlayerMotion(entries, step, time, mood)
     if (eliminate) for (const id of gone) this.remove(id)
@@ -342,6 +390,7 @@ export class PlayerSystem {
       player.damageDealt = 0
       player.giftCount = 0
       player.largestCombo = 0
+      player.participated = false
     }
     for (const body of this.bodies.values()) {
       this.fillVitals(body)
@@ -376,6 +425,22 @@ export class PlayerSystem {
       body.goalSerial = 0
       body.aimX = 0
       body.aimY = 0
+      body.ultPhase = 0
+      body.ultScale = 1
+      body.ultMul = 1
+      body.ultMulVel = 0
+      body.ultSpeed = 1
+      body.ultMove = 0
+      body.ultDash = 0
+      body.ultTrail = 0
+      body.ultJitter = 0
+      body.ultLeft = 0
+      body.ultToken = 0
+      body.echoX = []
+      body.echoY = []
+      body.giftMul = 1
+      body.giftPeak = 1
+      body.giftHold = 0
     }
   }
 
@@ -391,6 +456,26 @@ export class PlayerSystem {
     if (!body || body.dying > 0) return
     body.surge = Math.max(body.surge, extra)
     body.surgeHold = Math.max(body.surgeHold, hold)
+    body.attack = 1
+    body.nameTime = Math.max(body.nameTime, 1.8)
+  }
+
+  spotlight(id: string, seconds = SPOTLIGHT_SECONDS): void {
+    const body = this.bodies.get(id)
+    if (!body) return
+    this.fillVitals(body)
+    body.spotlight = Math.max(body.spotlight, seconds)
+    body.shown = 1
+    body.nameTime = Math.max(body.nameTime, 2.4)
+  }
+
+  /** Grows the circle to `scale` right away and keeps it there for `hold` seconds before easing back to 1. */
+  powerUp(id: string, scale: number, hold: number): void {
+    const body = this.bodies.get(id)
+    if (!body || body.dying > 0) return
+    this.fillVitals(body)
+    body.giftPeak = body.giftHold > 0 ? Math.max(body.giftPeak, scale) : scale
+    body.giftHold = Math.max(body.giftHold, hold)
     body.attack = 1
     body.nameTime = Math.max(body.nameTime, 1.8)
   }
@@ -416,6 +501,107 @@ export class PlayerSystem {
     return true
   }
 
+  directCinema(id: string, order: {
+    token: number
+    phase: 1 | 2 | 3 | 4
+    scale: number
+    speed: number
+    move: 0 | 1 | 2
+    dash: number
+    trail: number
+    jitter: number
+  }): void {
+    const body = this.bodies.get(id)
+    if (!body || body.dying > 0) return
+    if (order.phase === 4 && body.ultPhase === 0) return
+    this.fillVitals(body)
+    if (body.ultToken !== order.token) {
+      body.ultToken = order.token
+      body.ultHomeX = body.x
+      body.ultHomeY = body.y
+      const strike = strikeFor(body, order.move)
+      body.ultStrikeX = strike.x
+      body.ultStrikeY = strike.y
+    } else if (order.phase === 3 && body.ultPhase < 3 && (order.move === 1 || order.move === 2)) {
+      body.ultHomeX = body.x
+      body.ultHomeY = body.y
+      const strike = strikeFor(body, order.move)
+      body.ultStrikeX = strike.x
+      body.ultStrikeY = strike.y
+    }
+    if (order.phase === 4 && body.ultPhase !== 4) body.ultLeft = 0.42
+    body.ultPhase = order.phase
+    body.ultScale = order.phase === 4 ? 1 : order.scale
+    body.ultSpeed = order.speed
+    body.ultMove = order.move
+    body.ultDash = order.dash
+    body.ultTrail = order.trail
+    body.ultJitter = order.jitter
+    body.nameTime = Math.max(body.nameTime, 0.35)
+  }
+
+  releaseCinema(id: string): void {
+    const body = this.bodies.get(id)
+    if (!body || body.ultPhase < 1 || body.ultPhase > 3) return
+    body.ultPhase = 4
+    body.ultScale = 1
+    body.ultSpeed = 1.15
+    body.ultMove = 0
+    body.ultDash = 0
+    body.ultTrail = 0.25
+    body.ultJitter = 0
+    body.ultLeft = 0.42
+  }
+
+  attract(team: TeamId, x: number, y: number, power: number, toward: boolean): void {
+    for (const body of this.bodies.values()) {
+      if (body.team !== team || body.dying > 0 || body.hp <= 0) continue
+      if (body.ultPhase === 3 && body.ultMove === 1) continue
+      const dx = x - body.x
+      const dy = y - body.y
+      const dist = Math.hypot(dx, dy)
+      if (dist > 0.24 || dist < 0.01) continue
+      const falloff = (1 - dist / 0.24) * power
+      const dir = toward ? 1 : -1
+      body.vx += (dx / dist) * dir * falloff * 140
+      body.vy += (dy / dist) * dir * falloff * 70
+      body.flinch = Math.max(body.flinch, Math.min(1, falloff))
+      body.flinchX = (dx / dist) * dir
+      body.flinchY = (dy / dist) * dir
+    }
+  }
+
+  jolt(team: TeamId, x: number, y: number): void {
+    for (const body of this.bodies.values()) {
+      if (body.team !== team || body.dying > 0) continue
+      if (Math.hypot(body.x - x, body.y - y) > 0.28) continue
+      body.stun = Math.max(body.stun, 0.28)
+      body.vx += (Math.random() - 0.5) * 80
+      body.vy += (Math.random() - 0.5) * 46
+    }
+  }
+
+  /** Knocks the whole opposing side, used by the expensive cinema gifts. */
+  wave(team: TeamId, x: number, y: number, power: number): void {
+    for (const body of this.bodies.values()) {
+      if (body.team !== team || body.dying > 0 || body.hp <= 0) continue
+      const dx = body.x - x
+      const dy = body.y - y
+      const dist = Math.hypot(dx, dy) || 1
+      const falloff = Math.max(0.55, 1 - dist / 0.9)
+      const kick = power * falloff
+      body.vx += (dx / dist) * kick * 240
+      body.vy += (dy / dist) * kick * 110 - 55
+      body.flinch = Math.max(body.flinch, Math.min(1, kick))
+      body.flinchX = dx / dist
+      body.flinchY = dy / dist
+      body.attack = Math.max(body.attack, Math.min(1, kick))
+      body.stun = Math.max(body.stun, power > 1.3 ? 0.95 : 0.55)
+      body.crack = Math.max(body.crack, power > 1.3 ? 1 : 0.7)
+      body.lift = Math.max(body.lift, power > 1.3 ? 1 : 0.7)
+    }
+  }
+
   cast(id: string, peak: number, growth: number, crown = false): void {
     const body = this.bodies.get(id)
     if (!body || body.dying > 0) return
@@ -426,7 +612,7 @@ export class PlayerSystem {
       body.posePeak = Math.max(body.posePeak, peak)
       return
     }
-    body.poseMode = 1
+    body.poseMode = 2
     body.posePeak = peak
     body.poseClock = 0
     body.poseVel = 0
@@ -580,6 +766,7 @@ export class PlayerSystem {
         damageDealt: player.damageDealt,
         giftCount: player.giftCount,
         largestCombo: player.largestCombo,
+        participated: player.participated === true,
       }))
   }
 
@@ -606,6 +793,7 @@ export class PlayerSystem {
       damageDealt: player.damageDealt,
       giftCount: player.giftCount,
       largestCombo: player.largestCombo,
+      participated: player.participated === true,
     }
   }
 
@@ -650,9 +838,66 @@ export class PlayerSystem {
     if (typeof body.lunge !== 'number') body.lunge = 0
     if (!(body.speed >= 0)) body.speed = 0
     if (!(body.curve >= 0)) body.curve = 0
+    if (typeof body.ultPhase !== 'number') body.ultPhase = 0
+    if (typeof body.ultScale !== 'number') body.ultScale = 1
+    if (typeof body.ultMul !== 'number') body.ultMul = 1
+    if (typeof body.ultMulVel !== 'number') body.ultMulVel = 0
+    if (typeof body.ultSpeed !== 'number') body.ultSpeed = 1
+    if (typeof body.ultMove !== 'number') body.ultMove = 0
+    if (typeof body.ultDash !== 'number') body.ultDash = 0
+    if (typeof body.ultTrail !== 'number') body.ultTrail = 0
+    if (typeof body.ultJitter !== 'number') body.ultJitter = 0
+    if (typeof body.ultHomeX !== 'number') body.ultHomeX = body.x
+    if (typeof body.ultHomeY !== 'number') body.ultHomeY = body.y
+    if (typeof body.ultStrikeX !== 'number') body.ultStrikeX = body.x
+    if (typeof body.ultStrikeY !== 'number') body.ultStrikeY = body.y
+    if (typeof body.ultLeft !== 'number') body.ultLeft = 0
+    if (typeof body.ultToken !== 'number') body.ultToken = 0
+    if (!Array.isArray(body.echoX)) body.echoX = []
+    if (!Array.isArray(body.echoY)) body.echoY = []
+    if (!(body.giftMul > 0)) body.giftMul = 1
+    if (!(body.giftPeak > 0)) body.giftPeak = 1
+    if (!(body.giftHold >= 0)) body.giftHold = 0
+    if (!(body.spotlight >= 0)) body.spotlight = 0
+  }
+
+  private stepGift(body: PlayerBody, dt: number): void {
+    const holding = body.giftHold > 0
+    if (!holding && Math.abs(body.giftMul - 1) < 0.004) {
+      body.giftMul = 1
+      body.giftPeak = 1
+      return
+    }
+    if (holding) body.giftHold = Math.max(0, body.giftHold - dt)
+    const target = holding ? body.giftPeak : 1
+    const rate = target > body.giftMul ? 24 : 14
+    body.giftMul += (target - body.giftMul) * (1 - Math.exp(-rate * dt))
   }
 
   private stepPose(body: PlayerBody, dt: number): void {
+    this.stepGift(body, dt)
+    const phase = body.ultPhase || 0
+    const targetMul = phase > 0 && phase < 4 ? body.ultScale || 1 : 1
+    if (phase > 0 || (body.ultMul || 1) > 1.015) {
+      const sprung = springTo(body.ultMul || 1, body.ultMulVel || 0, targetMul, dt, 900, 18)
+      body.ultMul = sprung.value
+      body.ultMulVel = sprung.velocity
+    }
+    if (phase === 4) {
+      body.ultLeft = Math.max(0, (body.ultLeft ?? 0.42) - dt)
+      if (body.ultLeft <= 0 && Math.abs((body.ultMul || 1) - 1) < 0.04) {
+        body.ultPhase = 0
+        body.ultScale = 1
+        body.ultSpeed = 1
+        body.ultMove = 0
+        body.ultDash = 0
+        body.ultTrail = 0
+        body.ultJitter = 0
+        body.ultMul = 1
+        body.ultMulVel = 0
+        body.ultToken = 0
+      }
+    }
     const rest = 1 + body.power
     body.poseClock += dt
     body.poseSpin += dt * (body.poseMode > 0 ? 8.5 : 1.1)
@@ -661,7 +906,7 @@ export class PlayerSystem {
     if (body.poseHold > 0) {
       body.poseHold = Math.max(0, body.poseHold - dt)
       if (body.poseMode === 0 || body.poseMode === 1) body.poseMode = 2
-      target = rest * Math.min(1.25, Math.max(1.08, body.posePeak))
+      target = rest * Math.min(1.85, Math.max(1.08, body.posePeak))
       squash = 0.94
       if (body.poseHold === 0) {
         body.poseMode = 2
@@ -687,12 +932,12 @@ export class PlayerSystem {
       squash = 1.04
       if (body.poseClock > 0.28 && Math.abs(body.poseScale - rest) < 0.03) body.poseMode = 0
     }
-    if (body.posePeak > 1.4 && body.poseMode !== 0 && body.poseClock > 0.7) {
+    if (body.posePeak > 2.45 && body.poseMode !== 0 && body.poseClock > 0.7) {
       body.poseMode = 3
       body.posePeak = 1
       target = rest
     }
-    const scale = springTo(body.poseScale, body.poseVel, target, dt)
+    const scale = springTo(body.poseScale, body.poseVel, target, dt, body.poseMode === 2 ? 900 : 260, 16)
     body.poseScale = scale.value
     body.poseVel = scale.velocity
     const squashStep = springTo(body.poseSquash, body.poseSquashVel, squash, dt, 220, 14)
@@ -727,21 +972,13 @@ export class PlayerSystem {
     const ordered = [...this.players.values()]
       .filter((player) => player.team === team && !player.isNpc && !isNpcId(player.id))
       .sort((a, b) => a.joinedAt - b.joinedAt || a.id.localeCompare(b.id))
-    const count = ordered.length
-    const cols = count <= 1 ? 1 : count <= 4 ? 2 : count <= 12 ? 3 : 4
-    const rows = Math.max(1, Math.ceil(count / cols))
+    const spots = naturalSpots(ordered.map((player) => player.id), bounds, team)
     ordered.forEach((player, index) => {
       const body = this.bodies.get(player.id)
-      if (!body) return
-      const col = index % cols
-      const row = Math.floor(index / cols)
-      const padX = 0.02
-      const padY = 0.015
-      const innerW = Math.max(0.04, bounds.x1 - bounds.x0 - padX * 2)
-      const innerH = Math.max(0.04, bounds.y1 - bounds.y0 - padY * 2)
-      const faceCol = team === 'red' ? col : cols - 1 - col
-      body.homeX = bounds.x0 + padX + (cols === 1 ? innerW / 2 : ((faceCol + 0.5) * innerW) / cols)
-      body.homeY = bounds.y0 + padY + (rows === 1 ? innerH * 0.46 : ((row + 0.5) * innerH) / rows)
+      const spot = spots[index]
+      if (!body || !spot) return
+      body.homeX = spot.x
+      body.homeY = spot.y
       if (body.spawn < 0.05) {
         body.x = body.homeX
         body.y = body.homeY
@@ -782,6 +1019,58 @@ export function freshRoster(system: PlayerSystem): void {
   for (let i = 0; i < battleConfig.rosterBlue; i += 1) system.addGenerated('blue', false)
   for (const body of system.bodies.values()) body.nameTime = 0
   system.layoutAll()
+}
+
+function naturalSpots(ids: string[], bounds: Bounds, team: TeamId): { x: number; y: number }[] {
+  const count = ids.length
+  if (count === 0) return []
+  const width = Math.max(0.04, bounds.x1 - bounds.x0)
+  const height = Math.max(0.04, bounds.y1 - bounds.y0)
+  const aspect = width / height
+  let cols = Math.max(1, Math.round(Math.sqrt(count * Math.max(0.62, aspect * 1.45))))
+  if (count <= 2) cols = count
+  else if (count === 3) cols = 2
+  cols = Math.min(count, cols)
+  const rows = Math.ceil(count / cols)
+  const marginX = width * 0.08
+  const marginY = height * 0.08
+  const innerW = Math.max(0.02, width - marginX * 2)
+  const innerH = Math.max(0.02, height - marginY * 2)
+  const spots: { x: number; y: number }[] = []
+  for (let index = 0; index < count; index += 1) {
+    const row = Math.floor(index / cols)
+    const col = index % cols
+    const inRow = Math.min(cols, count - row * cols)
+    const staggered = row % 2 === 1 && inRow > 1
+    const face = team === 'red' ? col : inRow - 1 - col
+    const across = inRow === 1 ? 0.5 : staggered ? (face + 1) / (inRow + 1) : (face + 0.5) / inRow
+    const down = rows === 1 ? 0.5 : (row + 0.5) / rows
+    const cellW = innerW / Math.max(1, cols)
+    const cellH = innerH / Math.max(1, rows)
+    const jx = ((hashString(`${ids[index]}:hx`) % 21) - 10) / 10
+    const jy = ((hashString(`${ids[index]}:hy`) % 17) - 8) / 8
+    spots.push({
+      x: clamp(bounds.x0 + marginX + across * innerW + jx * cellW * 0.22, bounds.x0 + marginX * 0.35, bounds.x1 - marginX * 0.35),
+      y: clamp(bounds.y0 + marginY + down * innerH + jy * cellH * 0.2, bounds.y0 + marginY * 0.4, bounds.y1 - marginY * 0.4),
+    })
+  }
+  return spots
+}
+
+function strikeFor(body: PlayerBody, move: number): { x: number; y: number } {
+  const radius = Math.max(12, body.motionR || AVATAR_BASE / 2)
+  const yNow = body.y * DESIGN_HEIGHT
+  if (move === 1) {
+    const enemy = body.team === 'red' ? 'blue' : 'red'
+    const box = teamBox(enemy, false, radius)
+    const y = clamp(yNow, box.y0, box.y1)
+    const x = body.team === 'red' ? box.x0 + radius * 0.35 : box.x1 - radius * 0.35
+    return { x: x / DESIGN_WIDTH, y: y / DESIGN_HEIGHT }
+  }
+  const box = teamBox(body.team, false, radius)
+  const y = clamp(yNow, box.y0, box.y1)
+  const x = body.team === 'red' ? box.x1 : box.x0
+  return { x: x / DESIGN_WIDTH, y: y / DESIGN_HEIGHT }
 }
 
 function springTo(value: number, velocity: number, target: number, dt: number, stiffness = 260, damping = 16): { value: number; velocity: number } {

@@ -14,6 +14,8 @@ export interface Player {
   largestCombo: number
   joinedAt: number
   isNpc?: boolean
+  /** Set when this avatar receives a real viewer action, even if the id began as a field filler. */
+  participated?: boolean
 }
 
 export interface LeaderboardEntry {
@@ -27,4 +29,5 @@ export interface LeaderboardEntry {
   damageDealt: number
   giftCount: number
   largestCombo: number
+  participated?: boolean
 }

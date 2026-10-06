@@ -13,9 +13,9 @@ export interface Ink {
 
 export function inkOf(team: TeamId): Ink {
   if (team === 'red') {
-    return { core: 0xfff3ea, hot: 0xff3158, deep: 0x8d1630, metal: 0xf0c49a, spark: 0xffe7d2, accent: 0xffd0dc }
+    return { core: 0xfff4f6, hot: 0xd92d4a, deep: 0x7f142b, metal: 0xf5c451, spark: 0xf3c3cc, accent: 0xb91f3a }
   }
-  return { core: 0xf5f8ff, hot: 0x3d78ff, deep: 0x17306e, metal: 0xd5e0f0, spark: 0xe7f0ff, accent: 0xb9d2ff }
+  return { core: 0xf4f8ff, hot: 0x2583ff, deep: 0x0e3f91, metal: 0xf5c451, spark: 0xd5e4ff, accent: 0x1768d8 }
 }
 
 export function stroke(g: Graphics, pts: number[], width: number, color: number, alpha: number): void {

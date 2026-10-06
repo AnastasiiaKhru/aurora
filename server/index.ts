@@ -16,6 +16,7 @@ const bridge = new TikTokLiveBridge({
   socket,
 })
 
+socket.routeChat = (userId, username, avatarUrl, comment) => bridge.routeChat(userId, username, avatarUrl, comment)
 socket.listen()
 bridge.start()
 

@@ -1,5 +1,5 @@
 import { MemberMessageAction, type User, type WebcastChatMessage, type WebcastGiftMessage, type WebcastLikeMessage, type WebcastMemberMessage, type WebcastSocialMessage } from 'tiktok-live-connector'
-import type { CatalogGift, ChatPayload, GiftPayload, LikePayload, ViewerPayload } from './types.ts'
+import type { CatalogGift, ChatPayload, GiftPayload, LikePayload, LiveWireEvent, TeamId, ViewerPayload, WireGift, WireLike, WireSocial } from './types.ts'
 import type { SessionTeams } from './teams.ts'
 
 export interface GiftDecision {
@@ -76,9 +76,14 @@ export function likeFrom(message: WebcastLikeMessage, teams: SessionTeams): Like
   return { ...person, count: likeCount(message) }
 }
 
+/** TikTok LIVE 2.5 puts the text on `content`; older payloads use `comment`. */
+export function commentOf(message: { content?: unknown; comment?: unknown; text?: unknown }): string {
+  return asText(message.comment) || asText(message.content) || asText(message.text)
+}
+
 export function chatFrom(message: WebcastChatMessage, teams: SessionTeams): ChatPayload | null {
   const person = viewerFromUser(message.user, teams)
-  const text = (message.content ?? '').trim()
+  const text = commentOf(message)
   if (!person || !text) return null
   teams.teamFor(person.userId)
   return { userId: person.userId, username: person.username, avatarUrl: person.avatarUrl, text }
@@ -104,7 +109,132 @@ export function classifySocial(message: WebcastSocialMessage): 'follow' | 'share
 
 export function viewerKey(user: User | undefined): string {
   if (!user) return ''
-  return asText(user.id) || asText(user.displayId) || asText(user.nickname)
+  const record = user as User & { userId?: unknown; uniqueId?: unknown; secUid?: unknown }
+  return asText(user.id) || asText(record.userId) || asText(record.uniqueId) || asText(record.secUid) || asText(user.displayId) || asText(user.nickname)
+}
+
+export function uniqueIdOf(user: User | undefined): string {
+  if (!user) return ''
+  const record = user as User & { uniqueId?: unknown }
+  return asText(record.uniqueId) || asText(user.displayId)
+}
+
+export function usernameOf(user: User | undefined): string {
+  if (!user) return ''
+  return uniqueIdOf(user) || asText(user.nickname) || viewerKey(user)
+}
+
+let eventSeq = 0
+
+export function nextEventId(): string {
+  eventSeq += 1
+  return `live-${Date.now().toString(36)}-${eventSeq.toString(36)}`
+}
+
+export function wireChat(chat: ChatPayload): LiveWireEvent {
+  return {
+    type: 'chat',
+    userId: chat.userId,
+    username: chat.username,
+    comment: chat.text,
+    avatarUrl: chat.avatarUrl,
+    eventId: nextEventId(),
+  }
+}
+
+export function wireLike(like: LikePayload): WireLike {
+  return {
+    type: 'like',
+    userId: like.userId,
+    username: like.username,
+    count: like.count,
+    avatarUrl: like.avatarUrl,
+    team: like.team,
+    eventId: nextEventId(),
+  }
+}
+
+export function wireGift(gift: GiftPayload): WireGift {
+  return {
+    type: 'gift',
+    userId: gift.userId,
+    username: gift.username,
+    avatarUrl: gift.avatarUrl,
+    team: gift.team,
+    giftName: gift.giftName,
+    giftId: numericId(gift.giftId),
+    diamonds: gift.coinValue ?? 0,
+    repeatCount: gift.giftCount,
+    repeatEnd: gift.repeatEnd !== false,
+    ...(gift.preview ? { preview: true } : {}),
+    ...(gift.visualCount != null ? { visualCount: gift.visualCount } : {}),
+    ...(gift.image ? { image: gift.image } : {}),
+    eventId: nextEventId(),
+  }
+}
+
+export function wireSocial(kind: 'follow' | 'share' | 'join', viewer: ViewerPayload, explicit = false): WireSocial {
+  return {
+    type: kind,
+    userId: viewer.userId,
+    username: viewer.username,
+    avatarUrl: viewer.avatarUrl,
+    team: viewer.team,
+    ...(explicit ? { explicit: true } : {}),
+    eventId: nextEventId(),
+  }
+}
+
+export function injectWire(raw: unknown): LiveWireEvent | null {
+  if (!isRecord(raw) || typeof raw.type !== 'string') return null
+  const userId = asText(raw.userId)
+  const username = asText(raw.username) || 'viewer'
+  if (!userId) return null
+  const avatarUrl = typeof raw.avatarUrl === 'string' ? raw.avatarUrl : ''
+  const eventId = asText(raw.eventId) || nextEventId()
+  const team = readTeam(raw.team)
+  if (raw.type === 'chat') {
+    const comment = typeof raw.comment === 'string' ? raw.comment : typeof raw.text === 'string' ? raw.text : ''
+    if (!comment.trim()) return null
+    return { type: 'chat', userId, username, comment, avatarUrl, eventId }
+  }
+  if (raw.type === 'like') {
+    return { type: 'like', userId, username, avatarUrl, count: positiveCount(raw.count), ...(team ? { team } : {}), eventId }
+  }
+  if (raw.type === 'gift') {
+    const giftName = asText(raw.giftName) || 'Gift'
+    const giftId = numericId(raw.giftId)
+    const diamonds = finite(raw.diamonds) ?? finite(raw.coinValue) ?? 0
+    const repeatCount = Math.max(1, Math.round(finite(raw.repeatCount) ?? finite(raw.giftCount) ?? 1))
+    return {
+      type: 'gift',
+      userId,
+      username,
+      avatarUrl,
+      giftName,
+      giftId,
+      diamonds,
+      repeatCount,
+      repeatEnd: raw.repeatEnd !== false && raw.preview !== true,
+      ...(raw.preview === true ? { preview: true, repeatEnd: false } : {}),
+      ...(team ? { team } : {}),
+      ...(finite(raw.visualCount) != null ? { visualCount: finite(raw.visualCount) } : {}),
+      ...(typeof raw.image === 'string' && raw.image ? { image: raw.image } : {}),
+      eventId,
+    }
+  }
+  if (raw.type === 'follow' || raw.type === 'share' || raw.type === 'join') {
+    return {
+      type: raw.type,
+      userId,
+      username,
+      avatarUrl,
+      ...(team ? { team } : {}),
+      ...(raw.explicit === true ? { explicit: true } : {}),
+      eventId,
+    }
+  }
+  return null
 }
 
 export function readCatalog(raw: unknown): CatalogGift[] {
@@ -133,7 +263,7 @@ function largestAvatar(user: User): string {
 function viewerFromUser(user: User | undefined, teams: SessionTeams): ViewerPayload | null {
   const userId = viewerKey(user)
   if (!user || !userId) return null
-  const username = asText(user.displayId) || asText(user.nickname) || 'viewer'
+  const username = usernameOf(user) || 'viewer'
   return {
     userId,
     username,
@@ -143,9 +273,10 @@ function viewerFromUser(user: User | undefined, teams: SessionTeams): ViewerPayl
 }
 
 function likeCount(message: WebcastLikeMessage): number {
-  if (typeof message.count === 'number' && message.count > 0) return message.count
+  const incremental = Number(message.count)
+  if (Number.isFinite(incremental) && incremental > 0) return Math.round(incremental)
   const effect = Number(message.effectCnt)
-  if (Number.isFinite(effect) && effect > 0 && effect <= 30) return effect
+  if (Number.isFinite(effect) && effect > 0 && effect <= 30) return Math.round(effect)
   return 1
 }
 
@@ -162,7 +293,36 @@ function socialHint(message: WebcastSocialMessage): string {
 function asText(value: unknown): string {
   if (typeof value === 'string') return value.trim()
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  if (typeof value === 'bigint') return value.toString()
+  if (value && typeof value === 'object' && 'low' in value && 'high' in value) {
+    const text = String(value)
+    if (text && text !== '[object Object]') return text.trim()
+  }
   return ''
+}
+
+function finite(value: unknown): number | undefined {
+  const count = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : Number.NaN
+  if (!Number.isFinite(count)) return undefined
+  return count
+}
+
+function positiveCount(value: unknown): number {
+  const count = finite(value)
+  if (count == null || count <= 0) return 1
+  return Math.min(500, Math.round(count))
+}
+
+function numericId(value: unknown): number | string {
+  const text = asText(value)
+  if (/^\d+$/.test(text)) return Number(text)
+  return text || 'unknown'
+}
+
+function readTeam(value: unknown): TeamId | undefined {
+  if (value === 'red' || value === 'canada') return 'red'
+  if (value === 'blue' || value === 'usa') return 'blue'
+  return undefined
 }
 
 function readExtended(value: unknown): { name?: string; diamondCount?: number; giftType?: number; imageUrl?: string } | null {

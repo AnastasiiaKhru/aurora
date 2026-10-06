@@ -78,7 +78,7 @@ export function createAudioGraph(ctx: AudioContext): AudioGraph {
   limiter.release.value = 0.06
 
   music.gain.value = 0.0001
-  effects.gain.value = 0.55
+  effects.gain.value = 0.52
   duck.gain.value = 1
   bedTrim.gain.value = 0.09
   master.gain.value = 1

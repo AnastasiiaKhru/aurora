@@ -55,6 +55,7 @@ export class BattlefieldApp {
     app.canvas.removeEventListener('pointerdown', this.onPointer)
     app.ticker.remove(this.onTick)
     this.players?.reset()
+    this.attacks?.release()
     this.attacks?.reset()
     this.effects?.reset()
     app.destroy({ removeView: true }, { children: true, texture: true, textureSource: true })

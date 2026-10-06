@@ -557,23 +557,26 @@ const sfx = {
     return out
   },
   projectile: () => {
-    const out = buffer(0.2)
-    addNoise(out, 0, 0.08, 0.12, 40, 3, 0.8)
-    addSweep(out, 0.015, 0.16, 420, 980, 0.32)
+    const out = buffer(0.12)
+    addNoise(out, 0, 0.028, 0.48, 90, 3, 0.95)
+    addOsc(out, 0, 0.07, 920, 210, 0.26, 0.15)
+    addOsc(out, 0, 0.045, 160, 70, 0.14)
     return out
   },
   laser: () => {
-    const out = buffer(0.26)
-    addOsc(out, 0, 0.22, 1400, 620, 0.22, 0.45)
-    addOsc(out, 0, 0.18, 2100, 900, 0.08)
-    addNoise(out, 0, 0.05, 0.05, 60, 19, 0.9)
+    const out = buffer(0.15)
+    addNoise(out, 0, 0.02, 0.32, 100, 19, 0.95)
+    addOsc(out, 0, 0.09, 1720, 460, 0.22, 0.4)
+    addOsc(out, 0, 0.05, 2480, 880, 0.07)
     return out
   },
   'missile-launch': () => {
     const out = buffer(0.62)
-    addSweep(out, 0, 0.22, 90, 240, 0.32)
-    addNoise(out, 0.12, 0.42, 0.22, 6, 21, 0.35)
-    addSweep(out, 0.16, 0.4, 180, 70, 0.2)
+    addNoise(out, 0, 0.03, 0.42, 80, 21, 0.92)
+    addOsc(out, 0, 0.08, 480, 140, 0.24)
+    addSweep(out, 0.02, 0.2, 90, 240, 0.28)
+    addNoise(out, 0.12, 0.42, 0.18, 6, 29, 0.35)
+    addSweep(out, 0.16, 0.4, 180, 70, 0.16)
     return out
   },
   'missile-flight': () => {
@@ -769,7 +772,326 @@ function renderBattleStart() {
   return out
 }
 
-if (process.argv.includes('--cue-only')) {
+/** Hard CHK / KSH. Mid noise only, so the click stays crisp without a bird tone. */
+function addClick(out, start, dur, amp, seed, lo = 850, hi = 1650) {
+  addBand(out, start, dur, amp, seed, lo, hi, 90)
+}
+
+/** Low-mid energy body. Fundamental stays under 280 Hz. */
+function addBody(out, start, dur, f0, f1, amp, color = 0.28) {
+  const a0 = Math.floor(start * SR)
+  const n = Math.max(1, Math.floor(dur * SR))
+  let phase = 0
+  for (let i = 0; i < n; i += 1) {
+    const idx = a0 + i
+    if (idx < 0 || idx >= out.length) continue
+    const t = i / SR
+    const p = i / Math.max(1, n - 1)
+    const f = f0 * (f1 / Math.max(1, f0)) ** p
+    phase += (TAU * f) / SR
+    const attack = Math.min(1, t / 0.004)
+    const e = attack * Math.exp(-t / Math.max(0.028, dur * 0.46))
+    const s = Math.sin(phase) + color * Math.sin(phase * 2) + color * 0.28 * Math.sin(phase * 3.02)
+    out[idx] += s * e * amp
+  }
+}
+
+/** Short bass thump. Drops fast so it reads as impact, not a note. */
+function addThump(out, start, dur, f0, f1, amp) {
+  addBody(out, start, dur, f0, f1, amp, 0.12)
+}
+
+function addBand(out, start, dur, amp, seed, lo, hi, decay) {
+  const a0 = Math.floor(start * SR)
+  const n = Math.max(1, Math.floor(dur * SR))
+  const hiA = 1 - Math.exp((-TAU * hi) / SR)
+  const loA = 1 - Math.exp((-TAU * lo) / SR)
+  let high = 0
+  let low = 0
+  for (let i = 0; i < n; i += 1) {
+    const idx = a0 + i
+    if (idx < 0 || idx >= out.length) continue
+    const raw = noiseAt(seed + i * 5 + 11)
+    high += hiA * (raw - high)
+    low += loA * (raw - low)
+    const t = i / SR
+    const e = Math.min(1, t / 0.0011) * Math.exp(-t * decay)
+    out[idx] += (high - low) * e * amp
+  }
+}
+
+/** Beating low-mid rumble for charges. Two close tones, no high partials. */
+function addRumble(out, start, dur, f, amp) {
+  const a0 = Math.floor(start * SR)
+  const n = Math.max(1, Math.floor(dur * SR))
+  let phaseA = 0
+  let phaseB = 0
+  for (let i = 0; i < n; i += 1) {
+    const idx = a0 + i
+    if (idx < 0 || idx >= out.length) continue
+    const t = i / SR
+    phaseA += (TAU * f) / SR
+    phaseB += (TAU * f * 0.94) / SR
+    const swell = Math.min(1, t / Math.max(0.04, dur * 0.42))
+    const tail = Math.exp(-Math.max(0, t - dur * 0.55) / Math.max(0.03, dur * 0.22))
+    out[idx] += (Math.sin(phaseA) * 0.72 + Math.sin(phaseB) * 0.48) * swell * tail * amp
+  }
+}
+
+/** Short inharmonic crack in the mid band. Fast enough that it never becomes a chime. */
+function addMetal(out, start, amp) {
+  const partials = [
+    [310, 0.034, 0.46],
+    [470, 0.028, 0.32],
+    [690, 0.022, 0.2],
+    [980, 0.016, 0.1],
+  ]
+  for (const [freq, dur, gain] of partials) addBody(out, start, dur, freq, freq * 0.9, amp * gain, 0.05)
+}
+
+function shaped(seconds, draw, level) {
+  const out = buffer(seconds)
+  draw(out)
+  normalize(out, level)
+  return out
+}
+
+function sum(parts) {
+  const out = new Float32Array(parts[0].length)
+  for (const part of parts) {
+    for (let i = 0; i < out.length; i += 1) out[i] += part[i] ?? 0
+  }
+  return out
+}
+
+function krak(seconds, start, level, seed, thump = 160) {
+  return sum([
+    shaped(seconds, (out) => addClick(out, start, 0.012, 1, seed, 1050, 2300), level),
+    shaped(seconds, (out) => addMetal(out, start, 1), level * 0.72),
+    shaped(seconds, (out) => addThump(out, start, 0.065, thump, thump * 0.55, 1), level * 0.7),
+    shaped(seconds, (out) => addBand(out, start, 0.04, 1, seed + 9, 320, 980, 30), level * 0.42),
+  ])
+}
+
+function drive(out, amount) {
+  for (let i = 0; i < out.length; i += 1) out[i] = Math.tanh(out[i] * amount)
+}
+
+function fadeTail(out, ms = 6) {
+  const n = Math.min(out.length, Math.floor((ms / 1000) * SR))
+  for (let i = 0; i < n; i += 1) out[out.length - 1 - i] *= i / n
+  const head = Math.min(out.length, Math.floor(0.00035 * SR))
+  for (let i = 0; i < head; i += 1) out[i] *= i / Math.max(1, head)
+}
+
+function finishAttack(out, driveAmount, peak) {
+  drive(out, driveAmount)
+  fadeTail(out, 8)
+  normalize(out, peak)
+  return out
+}
+
+function bandReport(samples) {
+  const cuts = [180, 700, 1800]
+  const state = cuts.map(() => 0)
+  const alpha = cuts.map((freq) => 1 - Math.exp((-TAU * freq) / SR))
+  const energy = [0, 0, 0, 0]
+  for (let i = 0; i < samples.length; i += 1) {
+    const x = samples[i]
+    for (let band = 0; band < cuts.length; band += 1) state[band] += alpha[band] * (x - state[band])
+    const parts = [state[0], state[1] - state[0], state[2] - state[1], x - state[2]]
+    for (let band = 0; band < parts.length; band += 1) energy[band] += parts[band] * parts[band]
+  }
+  const total = energy.reduce((sum, value) => sum + value, 0) || 1
+  const names = ['sub', 'low-mid', 'mid', 'high']
+  return names.map((name, index) => `${name} ${Math.round((energy[index] / total) * 100)}%`).join('  ')
+}
+
+const attacks = {
+  'atk-like': () => {
+    const seconds = 0.14
+    return finishAttack(
+      sum([
+        shaped(seconds, (out) => addClick(out, 0, 0.012, 1, 11, 1100, 2300), 0.92),
+        shaped(seconds, (out) => addBand(out, 0, 0.045, 1, 23, 280, 860, 24), 0.48),
+        shaped(seconds, (out) => addBody(out, 0.004, 0.12, 248, 168, 1, 0.55), 0.8),
+        shaped(seconds, (out) => addThump(out, 0.008, 0.09, 118, 74, 1), 0.42),
+      ]),
+      1.2,
+      0.74,
+    )
+  },
+  'atk-follow': () => {
+    const seconds = 0.22
+    return finishAttack(
+      sum([
+        shaped(seconds, (out) => addClick(out, 0, 0.014, 1, 31, 980, 2100), 0.95),
+        shaped(seconds, (out) => addBand(out, 0, 0.12, 1, 44, 220, 780, 8), 0.72),
+        shaped(seconds, (out) => addBody(out, 0.008, 0.16, 210, 132, 1, 0.42), 0.78),
+        shaped(seconds, (out) => addThump(out, 0.06, 0.12, 108, 58, 1), 0.62),
+      ]),
+      1.2,
+      0.78,
+    )
+  },
+  'atk-share': () => {
+    const seconds = 0.32
+    return finishAttack(
+      sum([
+        shaped(seconds, (out) => addClick(out, 0, 0.012, 1, 7, 1000, 2200), 0.8),
+        shaped(seconds, (out) => addBody(out, 0, 0.14, 220, 150, 1, 0.4), 0.48),
+        krak(seconds, 0.07, 0.74, 51, 176),
+        krak(seconds, 0.15, 0.84, 63, 158),
+        krak(seconds, 0.23, 0.94, 77, 142),
+      ]),
+      1.15,
+      0.8,
+    )
+  },
+  'atk-small': () => {
+    const seconds = 0.3
+    return finishAttack(
+      sum([
+        shaped(seconds, (out) => addClick(out, 0, 0.012, 1, 18, 900, 1900), 0.62),
+        shaped(seconds, (out) => addBand(out, 0, 0.14, 1, 28, 180, 640, 7), 0.58),
+        shaped(seconds, (out) => addBody(out, 0, 0.18, 168, 102, 1, 0.36), 0.86),
+        shaped(seconds, (out) => addThump(out, 0.01, 0.14, 92, 54, 1), 0.5),
+        krak(seconds, 0.15, 0.96, 81, 148),
+      ]),
+      1.18,
+      0.82,
+    )
+  },
+  'atk-medium': () => {
+    const seconds = 0.42
+    return finishAttack(
+      sum([
+        shaped(seconds, (out) => addRumble(out, 0, 0.15, 88, 1), 0.7),
+        shaped(seconds, (out) => addBody(out, 0, 0.14, 176, 128, 1, 0.34), 0.55),
+        shaped(seconds, (out) => addBand(out, 0.1, 0.14, 1, 36, 200, 760, 7), 0.68),
+        shaped(seconds, (out) => addBody(out, 0.1, 0.14, 240, 160, 1, 0.3), 0.5),
+        shaped(seconds, (out) => addClick(out, 0.24, 0.014, 1, 52, 960, 2100), 0.95),
+        shaped(seconds, (out) => addThump(out, 0.24, 0.12, 140, 78, 1), 0.66),
+        shaped(seconds, (out) => addMetal(out, 0.24, 1), 0.92),
+        shaped(seconds, (out) => addBand(out, 0.25, 0.09, 1, 66, 280, 980, 18), 0.4),
+      ]),
+      1.15,
+      0.86,
+    )
+  },
+  'hit-small': () => finishAttack(krak(0.1, 0, 0.9, 9, 188), 1.25, 0.72),
+  'hit-medium': () => {
+    const seconds = 0.14
+    return finishAttack(
+      sum([
+        krak(seconds, 0, 0.95, 14, 168),
+        shaped(seconds, (out) => addThump(out, 0, 0.08, 120, 70, 1), 0.38),
+      ]),
+      1.2,
+      0.78,
+    )
+  },
+  'hit-large': () => {
+    const seconds = 0.22
+    return finishAttack(
+      sum([
+        shaped(seconds, (out) => addClick(out, 0, 0.014, 1, 21, 900, 2000), 0.95),
+        shaped(seconds, (out) => addMetal(out, 0, 1), 0.95),
+        shaped(seconds, (out) => addThump(out, 0, 0.12, 130, 64, 1), 0.62),
+        shaped(seconds, (out) => addBody(out, 0.004, 0.1, 90, 58, 1, 0.12), 0.32),
+        shaped(seconds, (out) => addBand(out, 0.01, 0.1, 1, 33, 220, 860, 14), 0.42),
+      ]),
+      1.15,
+      0.88,
+    )
+  },
+}
+
+function attackBig() {
+  const seconds = 0.68
+  const body = sum([
+    shaped(seconds, (out) => addRumble(out, 0, 0.15, 92, 1), 0.48),
+    shaped(seconds, (out) => addBody(out, 0.01, 0.14, 168, 124, 1, 0.34), 0.58),
+    shaped(seconds, (out) => addBody(out, 0.14, 0.16, 230, 150, 1, 0.32), 0.62),
+    shaped(seconds, (out) => addThump(out, 0.3, 0.2, 120, 58, 1), 0.64),
+    shaped(seconds, (out) => addBody(out, 0.31, 0.14, 72, 46, 1, 0.1), 0.34),
+  ])
+  const air = sum([
+    shaped(seconds, (out) => addBand(out, 0.12, 0.2, 1, 41, 200, 720, 6.5), 0.7),
+    shaped(seconds, (out) => addBand(out, 0.32, 0.16, 1, 12, 180, 640, 10), 0.4),
+  ])
+  const crack = sum([
+    shaped(seconds, (out) => addMetal(out, 0.3, 1), 0.9),
+    shaped(seconds, (out) => addClick(out, 0.3, 0.016, 1, 90, 1000, 2200), 0.86),
+  ])
+  const n = body.length
+  const left = new Float32Array(n)
+  const right = new Float32Array(n)
+  const delay = Math.floor(0.008 * SR)
+  for (let i = 0; i < n; i += 1) {
+    const delayed = i >= delay ? i - delay : -1
+    const airLate = delayed >= 0 ? air[delayed] : 0
+    const crackLate = delayed >= 0 ? crack[delayed] : 0
+    left[i] = body[i] + air[i] * 0.82 + crack[i]
+    right[i] = body[i] * 0.96 + air[i] * 1.08 + airLate * 0.35 + crackLate * 0.92
+  }
+  drive(left, 1.4)
+  drive(right, 1.4)
+  fadeTail(left, 12)
+  fadeTail(right, 12)
+  let peak = 0
+  for (let i = 0; i < n; i += 1) peak = Math.max(peak, Math.abs(left[i]), Math.abs(right[i]))
+  const gain = peak > 0.00001 ? 0.9 / peak : 0
+  for (let i = 0; i < n; i += 1) {
+    left[i] *= gain
+    right[i] *= gain
+  }
+  return { left, right }
+}
+
+function wavStereo(left, right) {
+  const n = Math.min(left.length, right.length)
+  const data = Buffer.alloc(n * 4)
+  for (let i = 0; i < n; i += 1) {
+    data.writeInt16LE((clamp(left[i], -1, 1) * 32767) | 0, i * 4)
+    data.writeInt16LE((clamp(right[i], -1, 1) * 32767) | 0, i * 4 + 2)
+  }
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0)
+  header.writeUInt32LE(36 + data.length, 4)
+  header.write('WAVE', 8)
+  header.write('fmt ', 12)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(2, 22)
+  header.writeUInt32LE(SR, 24)
+  header.writeUInt32LE(SR * 4, 28)
+  header.writeUInt16LE(4, 32)
+  header.writeUInt16LE(16, 34)
+  header.write('data', 36)
+  header.writeUInt32LE(data.length, 40)
+  return Buffer.concat([header, data])
+}
+
+if (process.argv.includes('--attacks')) {
+  for (const [name, factory] of Object.entries(attacks)) {
+    const out = factory()
+    console.log(`${name} bands  ${bandReport(out)}`)
+    await emit(`sfx/${name}.wav`, out)
+  }
+  const big = attackBig()
+  const merged = new Float32Array(big.left.length)
+  for (let i = 0; i < merged.length; i += 1) merged[i] = (big.left[i] + big.right[i]) * 0.5
+  console.log(`atk-big bands  ${bandReport(merged)}`)
+  const file = join(ROOT, 'sfx/atk-big.wav')
+  await mkdir(dirname(file), { recursive: true })
+  await writeFile(file, wavStereo(big.left, big.right))
+  console.log(`sfx/atk-big.wav\t${(big.left.length / SR).toFixed(2)}s\tstereo`)
+} else if (process.argv.includes('--shots')) {
+  for (const name of ['projectile', 'laser', 'missile-launch']) {
+    await emit(`sfx/${name}.wav`, renderNamed(name, sfx[name], peaks[name] ?? 0.8))
+  }
+} else if (process.argv.includes('--cue-only')) {
   await emit('sfx/battle-start.wav', renderBattleStart())
 } else {
 await emit('music/battle-main.wav', renderArena(116, 16, false))

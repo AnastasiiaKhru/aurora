@@ -112,25 +112,13 @@ function BattleView() {
   useEffect(() => {
     director.sound.enterBattle()
     director.startLoop()
-    let stop = () => {}
-    const connect = () => {
-      stop()
-      stop = () => {}
-      if (!director.leading) return
-      const live = new LiveTikTokAdapter(tiktokSocketUrl())
-      const detach = attachTikTokAdapter(live)
-      stop = () => {
-        detach()
-        live.stop()
-      }
-    }
-    const unsub = director.onRole(connect)
-    connect()
+    const live = new LiveTikTokAdapter(tiktokSocketUrl())
+    const detach = attachTikTokAdapter(live)
     director.reclaim()
     director.players.layoutAll()
     return () => {
-      unsub()
-      stop()
+      detach()
+      live.stop()
       director.sound.leaveBattle()
       director.stopLoop()
     }
@@ -172,37 +160,24 @@ function AdminView() {
   useEffect(() => {
     director.startLoop()
     setBroadcastMode(mode)
-    let stop = () => {}
-    const connect = () => {
-      stop()
-      stop = () => {}
-      if (mode === 'simulator') {
-        const detach = attachTikTokAdapter(mockTikTok)
-        stop = detach
-        setLink({ phase: 'offline', username: '', roomId: '', detail: 'Simulator' })
-        return
-      }
-      if (!director.leading) return
-      const live = new LiveTikTokAdapter(tiktokSocketUrl())
-      const detach = attachTikTokAdapter(live)
-      const detachStatus = live.onStatus(setLink)
-      const detachChat = live.onChat((entry) => setChat((current) => [entry, ...current].slice(0, 6)))
-      const detachLog = live.on((event) => {
-        if (mode === 'private') recordLiveEvent(describeLiveEvent(event))
-      })
-      stop = () => {
-        detach()
-        detachStatus()
-        detachChat()
-        detachLog()
-        live.stop()
-      }
-    }
-    connect()
-    const unsub = director.onRole(connect)
+    const live = new LiveTikTokAdapter(tiktokSocketUrl())
+    const detachLive = attachTikTokAdapter(live)
+    const detachStatus = live.onStatus((status) => {
+      if (mode !== 'simulator') setLink(status)
+    })
+    const detachChat = live.onChat((entry) => setChat((current) => [entry, ...current].slice(0, 6)))
+    const detachLog = live.on((event) => {
+      if (mode === 'private') recordLiveEvent(describeLiveEvent(event))
+    })
+    const detachMock = mode === 'simulator' ? attachTikTokAdapter(mockTikTok) : () => {}
+    if (mode === 'simulator') setLink({ phase: 'offline', username: '', roomId: '', detail: 'Simulator' })
     return () => {
-      unsub()
-      stop()
+      detachMock()
+      detachLive()
+      detachStatus()
+      detachChat()
+      detachLog()
+      live.stop()
       director.stopLoop()
     }
   }, [mode])
@@ -241,12 +216,6 @@ function AdminView() {
       {mode === 'private' && <div className="test-mode-banner">TEST MODE</div>}
       <div className="chrome">
         <TikTokStatus phase={phase} detail={statusDetail} />
-        <button type="button" className={`chrome-btn ${mode === 'simulator' ? 'on' : ''}`} onClick={() => setMode('simulator')}>
-          Simulator
-        </button>
-        <button type="button" className={`chrome-btn ${mode === 'private' ? 'on' : ''}`} onClick={() => setMode('private')}>
-          Private test
-        </button>
         <button type="button" className={`chrome-btn ${mode === 'live' ? 'on' : ''}`} disabled={mode !== 'live' && !canEnableLive()} data-gate={liveGate} onClick={enableLive}>
           LIVE
         </button>

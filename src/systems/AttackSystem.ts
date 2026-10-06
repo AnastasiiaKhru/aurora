@@ -1,4 +1,3 @@
-import { battleConfig } from '../config/battleConfig.ts'
 import type { AttackCommand } from '../types/Battle.ts'
 
 interface Windup {
@@ -20,6 +19,11 @@ export class AttackSystem {
   }
 
   private readonly known = new Set<number>()
+  /**
+   * Visual spawn for a command that is ready right now.
+   * Return true when the projectile was created in this same call.
+   */
+  spawnNow: ((command: AttackCommand) => boolean) | null = null
 
   adopt(command: AttackCommand, delayMs = 0): void {
     if (this.known.has(command.id)) return
@@ -54,29 +58,20 @@ export class AttackSystem {
     return ready
   }
 
-  pull(activeCount: number): AttackCommand[] {
+  /**
+   * Hands every viewer attack to the renderer at once so nothing waits for an earlier animation.
+   * Only big ambient dummy shots hold back while a major viewer attack is on screen.
+   */
+  pull(majorsPlaying = 0): AttackCommand[] {
+    if (this.queue.length === 0) return []
     const out: AttackCommand[] = []
-    let heavy = Math.min(4, Math.max(1, battleConfig.maxActiveEffects - Math.min(activeCount, battleConfig.maxActiveEffects)))
-    let lights = 40
-    let index = 0
-    while (index < this.queue.length && (heavy > 0 || lights > 0)) {
-      const next = this.queue[index]
-      if (!next) break
-      if (next.giftName === 'Like') {
-        if (lights <= 0) {
-          index += 1
-          continue
-        }
-        this.queue.splice(index, 1)
-        out.push(next)
-        lights -= 1
-        continue
-      }
-      if (heavy <= 0) break
-      this.queue.splice(index, 1)
-      out.push(next)
-      heavy -= 1
+    const held: AttackCommand[] = []
+    for (const next of this.queue) {
+      const quietAmbient = next.ambient && majorsPlaying > 0 && next.rarity !== 'micro' && next.rarity !== 'small'
+      if (quietAmbient) held.push(next)
+      else out.push(next)
     }
+    this.queue = held
     return out
   }
 
@@ -86,9 +81,14 @@ export class AttackSystem {
   }
 
   private insert(command: AttackCommand): void {
+    if (this.spawnNow?.(command)) return
+    this.defer(command)
+  }
+
+  /** Puts a command back in line without creating another id. Used when a shot must wait. */
+  defer(command: AttackCommand): void {
     let index = 0
     while (index < this.queue.length && this.queue[index]!.priority >= command.priority) index += 1
     this.queue.splice(index, 0, command)
   }
-
 }

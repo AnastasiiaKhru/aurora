@@ -101,13 +101,13 @@ export const attackHeadlines: Record<AttackType, string> = {
 }
 
 export const teamPalette = {
-  red: 0xe11d48,
-  redHot: 0xffd0dc,
-  redDeep: 0x9b1230,
-  blue: 0x2d6bff,
-  blueIce: 0xd7e6ff,
-  blueDeep: 0x143a9a,
-  gold: 0xd5dde6,
+  red: 0xd92d4a,
+  redHot: 0xf3c3cc,
+  redDeep: 0x7f142b,
+  blue: 0x2583ff,
+  blueIce: 0xd5e4ff,
+  blueDeep: 0x0e3f91,
+  gold: 0xf5c451,
   ivory: 0xf4f7fb,
   white: 0xffffff,
   ink: 0x07080d,

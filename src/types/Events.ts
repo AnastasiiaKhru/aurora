@@ -4,7 +4,7 @@ export interface GiftEvent {
   userId: string
   username: string
   avatarUrl: string
-  team: TeamId
+  team?: TeamId
   giftId: string
   giftName: string
   giftCount: number

@@ -3,7 +3,7 @@ import { director } from '../systems/GameDirector.ts'
 import { formatScore } from '../utils/format.ts'
 import { BattleTimer } from './BattleTimer.tsx'
 import { ComboDisplay } from './ComboDisplay.tsx'
-import { JoinPrompt, PowerGuide } from './PowerGuide.tsx'
+import { HelpActions, JoinPrompt } from './PowerGuide.tsx'
 import { TeamHUD } from './TeamHUD.tsx'
 import { useDirector } from './useDirector.ts'
 import { CountdownOverlay } from './CountdownOverlay.tsx'
@@ -13,18 +13,15 @@ import type { PowerFlash } from '../types/Battle.ts'
 
 export function BattleHUD({ showSafeZones = false, showTikTokPreview = false }: { showSafeZones?: boolean; showTikTokPreview?: boolean }) {
   const hud = useDirector()
-  const total = hud.red.health + hud.blue.health
-  const redShare = total <= 0 ? 50 : Math.round((hud.red.health / total) * 100)
-  const blueShare = total <= 0 ? 50 : 100 - redShare
   return (
     <div className="hud">
       <header className="top-hud scoreboard">
-        <TeamHUD team={hud.red} side="left" share={redShare} />
+        <TeamHUD team={hud.red} side="left" />
         <BattleTimer hud={hud} />
-        <TeamHUD team={hud.blue} side="right" share={blueShare} />
+        <TeamHUD team={hud.blue} side="right" />
       </header>
       <JoinPrompt />
-      <PowerGuide />
+      <HelpActions />
       <ReservePills />
       <PowerNotice flash={hud.powerFlash} />
       {hud.rush && (
@@ -39,7 +36,7 @@ export function BattleHUD({ showSafeZones = false, showTikTokPreview = false }: 
       )}
       <ComboDisplay combos={hud.combos} />
       {hud.selected && <SelectedFighter player={hud.selected} />}
-      <VictoryScreen victory={hud.victory} />
+      <VictoryScreen victory={hud.victory} elapsed={hud.victoryMs} />
       <CountdownOverlay countdown={hud.countdown} />
       <SafeZoneGuide zones={showSafeZones} preview={showTikTokPreview} />
     </div>

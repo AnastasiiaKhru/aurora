@@ -37,14 +37,55 @@ export interface ConnectionStatusMessage {
   detail: string
 }
 
-export type BridgeMessage =
-  | ConnectionStatusMessage
-  | { type: 'viewerJoined'; payload: ViewerPayload }
-  | { type: 'giftReceived'; payload: GiftPayload }
-  | { type: 'likeReceived'; payload: LikePayload }
-  | { type: 'followReceived'; payload: ViewerPayload }
-  | { type: 'shareReceived'; payload: ViewerPayload }
-  | { type: 'chatReceived'; payload: ChatPayload }
+export interface WireChat {
+  type: 'chat'
+  userId: string
+  username: string
+  comment: string
+  avatarUrl: string
+  eventId: string
+}
+
+export interface WireLike {
+  type: 'like'
+  userId: string
+  username: string
+  count: number
+  avatarUrl: string
+  team?: TeamId
+  eventId: string
+}
+
+export interface WireGift {
+  type: 'gift'
+  userId: string
+  username: string
+  giftName: string
+  giftId: number | string
+  diamonds: number
+  repeatCount: number
+  repeatEnd: boolean
+  avatarUrl: string
+  team?: TeamId
+  preview?: boolean
+  visualCount?: number
+  image?: string
+  eventId: string
+}
+
+export interface WireSocial {
+  type: 'follow' | 'share' | 'join'
+  userId: string
+  username: string
+  avatarUrl: string
+  team?: TeamId
+  explicit?: boolean
+  eventId: string
+}
+
+export type LiveWireEvent = WireChat | WireLike | WireGift | WireSocial
+
+export type BridgeMessage = ConnectionStatusMessage | LiveWireEvent
 
 export interface CatalogGift {
   id: string

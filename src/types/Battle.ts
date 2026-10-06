@@ -113,4 +113,6 @@ export interface AttackCommand {
   npcKind?: 'maple' | 'star'
   /** Ambient dummy shot. Visual only; damage stays on the command and never credits a viewer. */
   ambient?: boolean
+  /** Visual weight: projectile size, impact particles and shockwave. 1 or absent is a normal shot. */
+  power?: number
 }

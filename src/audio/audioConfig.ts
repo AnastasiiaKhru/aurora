@@ -4,7 +4,7 @@
  * A missing file falls back to the local royalty-free bed, then to silence.
  */
 export const backgroundMusicConfig = {
-  enabled: true,
+  enabled: false,
   src: '/audio/background-track.mp3',
   defaultVolume: 0.25,
   battleVolume: 0.3,

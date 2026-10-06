@@ -71,7 +71,7 @@ export class BackgroundMusic implements MusicController {
   userVolume = readNumber(musicStorageKeys.volume, backgroundMusicConfig.defaultVolume)
   unlocked = false
   private route: AudioRoute | 'none' = 'none'
-  private enabled = readBool(musicStorageKeys.enabled, backgroundMusicConfig.enabled)
+  private enabled = backgroundMusicConfig.enabled && readBool(musicStorageKeys.enabled, false)
   private muted = readBool(musicStorageKeys.muted, false)
   private loop = readBool(musicStorageKeys.loop, backgroundMusicConfig.loop)
   private allowRate = readBool(musicStorageKeys.allowRate, false)

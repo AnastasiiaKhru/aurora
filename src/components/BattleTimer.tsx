@@ -1,13 +1,15 @@
 import type { HudSnapshot } from '../types/Battle.ts'
-import { formatClock, formatElapsed } from '../utils/format.ts'
 
 export function BattleTimer({ hud }: { hud: HudSnapshot }) {
-  const clock = hud.endless ? formatElapsed(hud.elapsedMs) : formatClock(hud.timeLeftMs)
   return (
-    <div className={`timer phase-${hud.phase} status-${hud.status}`}>
-      <div className="clock">{clock}</div>
-      {hud.phase === 'final_rush' && <div className="timer-flag">Final Rush</div>}
-      {hud.phase === 'final_10' && <div className="timer-flag hot">Final</div>}
+    <div className={`timer phase-normal status-${hud.status}`}>
+      <div className="vs-mark" aria-hidden="true">
+        <span className="vs-crown" />
+        <span className="vs-letters">VS</span>
+        <i className="vs-spark s1" />
+        <i className="vs-spark s2" />
+        <i className="vs-spark s3" />
+      </div>
       {hud.status === 'paused' && <div className="timer-flag">Paused</div>}
     </div>
   )

@@ -79,7 +79,7 @@ export function permanentAvatarDiameter(power: number, leader: boolean): number 
 export function clampedAttackScale(poseScale: number, power: number, peak: number): number {
   const rest = 1 + Math.max(0, power)
   const raw = (poseScale > 0 ? poseScale : rest) / rest
-  const cap = peak > 1.4 ? 1.4 : 1.25
+  const cap = peak > 1.4 ? 2.32 : 1.65
   return Math.min(cap, Math.max(0.92, raw))
 }
 

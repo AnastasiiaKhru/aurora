@@ -1,5 +1,7 @@
 import type { Graphics } from 'pixi.js'
+import type { AttackType } from '../../types/Gift.ts'
 import type { TeamId } from '../../types/Team.ts'
+import { drawSignature } from './signature.ts'
 import { crystalShard, crown, inkOf, maple, petal, planetBody, portalRing, roseHead, silhouette, star, stem, stroke } from './draw.ts'
 import { effectDensity, lowQuality, motionScale } from './lab.ts'
 import { accel, cubic, lerp, lerpPt, muzzle, perpendicular, smooth, type Pt } from './motion.ts'
@@ -45,6 +47,11 @@ export interface AttackCtx {
   motif: string
   style: AttackStyle
   count: number
+  attackType?: AttackType
+  giftName?: string
+  ambient?: boolean
+  hitAt?: number
+  hits?: number[]
   emit: (mote: Omit<Mote, 'on' | 'max'> & { max?: number }) => void
   fx: (item: Omit<Fx, 'age'>) => void
   orb: (x: number, y: number, size: number, color: number, alpha: number) => void
@@ -54,6 +61,8 @@ export interface AttackCtx {
 const TAU = Math.PI * 2
 
 export function drawAttack(ctx: AttackCtx): Pt {
+  const signed = drawSignature(ctx)
+  if (signed) return signed
   switch (ctx.style) {
     case 'comet':
       return drawComet(ctx)
@@ -84,17 +93,20 @@ function budget(base: number): number {
 
 function drawPulse(ctx: AttackCtx): Pt {
   const ink = inkOf(ctx.team)
-  const head = flight(ctx, 0.16, 0.8, ctx.unit * (18 + ctx.seed * 4), 1)
+  const head = flight(ctx, 0, 0.7, ctx.unit * (10 + ctx.seed * 2), 1, true)
   const thick = Math.min(6, ctx.count)
-  if (ctx.t < 0.2) {
-    const a = ctx.age * 9 + ctx.seed
-    ctx.g.arc(ctx.from.x, ctx.from.y, 16 * ctx.unit, a, a + 1.3).stroke({ width: 1.6, color: ink.core, alpha: 0.9 })
+  if (ctx.t < 0.14) {
+    const flash = 1 - ctx.t / 0.14
+    ctx.orb(ctx.from.x, ctx.from.y, 14 * ctx.unit, ink.hot, 0.7 * flash)
+    ctx.g.circle(ctx.from.x, ctx.from.y, (4 + (1 - flash) * 10) * ctx.unit).stroke({ width: 1.8, color: 0xffffff, alpha: flash })
   }
   if (head.u < 1) {
-    const pts = ribbon(ctx, head.u, ctx.unit * 16)
-    stroke(ctx.glow, pts, (4 + thick) * ctx.unit, ink.hot, 0.35)
-    stroke(ctx.g, pts, (1.4 + thick * 0.25) * ctx.unit, ink.core, 0.9)
-    ctx.streak(head.point.x, head.point.y, 22 * ctx.unit, 4 * ctx.unit, head.ang, ink.hot, 0.8)
+    const pts = ribbon(ctx, head.u, ctx.unit * 8)
+    const tail = pts.length > 8 ? pts.slice(pts.length - 8) : pts
+    stroke(ctx.glow, tail, (5 + thick) * ctx.unit, ink.hot, 0.45)
+    stroke(ctx.g, tail, (1.8 + thick * 0.3) * ctx.unit, ink.core, 0.95)
+    ctx.streak(head.point.x, head.point.y, 30 * ctx.unit, 5 * ctx.unit, head.ang, ink.hot, 0.95)
+    ctx.streak(head.point.x, head.point.y, 16 * ctx.unit, 2 * ctx.unit, head.ang, 0xffffff, 0.95)
     if (ctx.motif === 'note') note(ctx.g, head.point.x, head.point.y, 7 * ctx.unit, ink.metal)
     else if (ctx.motif === 'stamp') ctx.g.roundRect(head.point.x - 7, head.point.y - 5, 14, 10, 2).stroke({ width: 1.4, color: ink.core, alpha: 0.9 })
     else if (ctx.team === 'red') maple(ctx.g, head.point.x, head.point.y, 5.5 * ctx.unit, ink.hot, 0.95, head.ang)
@@ -104,9 +116,10 @@ function drawPulse(ctx: AttackCtx): Pt {
     }
     return head.point
   }
-  const k = smooth((ctx.t - 0.8) / 0.2)
-  ctx.orb(ctx.to.x, ctx.to.y, (8 + k * 16) * ctx.unit, ink.core, 1 - k)
-  ctx.g.circle(ctx.to.x, ctx.to.y, (3 + k * 10) * ctx.unit).stroke({ width: 1.2, color: ink.hot, alpha: 1 - k })
+  const k = smooth(Math.min(1, (ctx.t - 0.7) / 0.3))
+  ctx.orb(ctx.to.x, ctx.to.y, (12 + k * 20) * ctx.unit, ink.hot, 1 - k)
+  ctx.g.circle(ctx.to.x, ctx.to.y, (5 * (1 - k) + 1) * ctx.unit).fill({ color: 0xffffff, alpha: 1 - k })
+  ctx.g.circle(ctx.to.x, ctx.to.y, (4 + k * 14) * ctx.unit).stroke({ width: 2 * (1 - k) + 0.6, color: ink.core, alpha: 1 - k })
   return ctx.to
 }
 
@@ -452,9 +465,10 @@ function drawEclipse(ctx: AttackCtx): Pt {
   return wave > 0 ? front : ctx.from
 }
 
-function flight(ctx: AttackCtx, start: number, hit: number, bend: number, curve: number): { point: Pt; u: number; ang: number } {
+function flight(ctx: AttackCtx, start: number, hit: number, bend: number, curve: number, depart = false): { point: Pt; u: number; ang: number } {
   const span = Math.max(0.05, hit - start)
-  const u = smooth(Math.min(1, Math.max(0, (ctx.t - start) / span)))
+  const linear = Math.min(1, Math.max(0, (ctx.t - start) / span))
+  const u = depart ? 1 - (1 - linear) * (1 - linear) : smooth(linear)
   const n = perpendicular(ctx.from, ctx.to)
   const side = Math.sin(ctx.seed) >= 0 ? 1 : -1
   const c1 = lerpPt(ctx.from, ctx.to, 0.33)

@@ -41,37 +41,23 @@ export class BattleSystem {
   tick(dt: number): TimerSignals {
     const signals: TimerSignals = { changed: false, enteredRush: false, finalSecond: null, expired: false, roundOver: false }
     if (this.status === 'victory') {
-      if (this.victoryEndsAt <= 0) this.victoryEndsAt = Date.now() + battleConfig.victoryHoldMs
-      this.victoryElapsed = Math.max(0, Math.min(battleConfig.victoryHoldMs, Date.now() - (this.victoryEndsAt - battleConfig.victoryHoldMs)))
-      if (Date.now() >= this.victoryEndsAt) signals.roundOver = true
+      const hold = battleConfig.victoryHoldMs
+      const stepped = this.victoryElapsed + Math.max(0, dt) * 1000
+      const clock = this.victoryEndsAt > 0 ? Date.now() - (this.victoryEndsAt - hold) : 0
+      this.victoryElapsed = Math.max(0, Math.min(hold, Math.max(stepped, clock)))
+      if (this.victoryEndsAt <= 0) this.victoryEndsAt = Date.now() + Math.max(0, hold - this.victoryElapsed)
+      if (this.victoryElapsed >= hold || (this.victoryEndsAt > 0 && Date.now() >= this.victoryEndsAt)) signals.roundOver = true
       return signals
     }
-    if (this.status === 'running' && this.endless) {
+    if (this.status === 'running') {
+      this.endless = true
       this.elapsedMs += dt * 1000
       if (this.phase !== 'normal') {
         this.phase = 'normal'
         signals.changed = true
       }
-    } else if (this.status === 'running') {
-      const before = this.phase
-      this.timeLeftMs = Math.max(0, this.timeLeftMs - dt * 1000)
-      this.recomputePhase()
-      if (this.phase !== before) signals.changed = true
-      if (before !== 'final_rush' && this.phase === 'final_rush') {
-        signals.enteredRush = true
-      }
-      if (this.phase === 'final_10') {
-        const second = Math.ceil(this.timeLeftMs / 1000)
-        if (second !== this.finalSecond && second >= 1 && second <= 10) {
-          this.finalSecond = second
-          this.finalTen = { value: second, nonce: this.tenNonce++ }
-          signals.finalSecond = second
-          signals.changed = true
-        }
-      }
-      if (this.timeLeftMs <= 0) {
-        this.timeLeftMs = 0
-        signals.expired = true
+      if (this.finalTen) {
+        this.finalTen = null
         signals.changed = true
       }
     }
@@ -93,7 +79,7 @@ export class BattleSystem {
   }
 
   lockVictory(result: VictoryResult, top: LeaderboardEntry[], portraits: VictoryPortrait[]): boolean {
-    if (this.status === 'victory' || this.status === 'resetting' || this.victory) return false
+    if (this.status === 'victory' || this.status === 'resetting') return false
     const redScore = Math.round(this.red.score)
     const blueScore = Math.round(this.blue.score)
     if (result === 'red') this.blue.health = 0
@@ -278,6 +264,22 @@ function createTeam(id: TeamId): TeamState {
     likesTotal: 0,
     likeBank: 0,
   }
+}
+
+/** Integer shown on the team plate. 100 only at full HP, and 0 only when that team's real HP is 0. */
+export function teamHealthPercent(health: number, maxHealth: number): number {
+  if (!(maxHealth > 0) || !(health > 0)) return 0
+  if (health >= maxHealth) return 100
+  const shown = Math.floor((health / maxHealth) * 100 + 1e-9)
+  if (shown >= 100) return 99
+  if (shown <= 0) return 1
+  return shown
+}
+
+/** Bar width for the same HP. Tracks the real fraction, including a sliver above zero. */
+export function teamHealthBar(health: number, maxHealth: number): number {
+  if (!(maxHealth > 0) || !(health > 0)) return 0
+  return Math.min(100, (health / maxHealth) * 100)
 }
 
 export function riftTarget(red: TeamState, blue: TeamState): number {

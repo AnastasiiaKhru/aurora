@@ -16,7 +16,7 @@ export function Leaderboard({ entries }: { entries: LeaderboardEntry[] }) {
             <span className={`rank rank-${index + 1}`}>{index + 1}</span>
             <span className="boss-face">
               <img src={entry.avatarUrl} alt="" />
-              {index === 0 && <i className="boss-crown" aria-hidden="true" />}
+              <i className={`boss-crown crown-${index + 1}`} aria-hidden="true" />
             </span>
             <div>
               <strong>@{entry.username}</strong>
