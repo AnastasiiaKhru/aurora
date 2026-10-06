@@ -1,24 +1,32 @@
 import type { LeaderboardEntry } from '../types/Player.ts'
 import { director } from '../systems/GameDirector.ts'
 import { formatScore } from '../utils/format.ts'
-import { Announcement } from './Announcement.tsx'
 import { BattleTimer } from './BattleTimer.tsx'
 import { ComboDisplay } from './ComboDisplay.tsx'
-import { EventFeed } from './EventFeed.tsx'
-import { Leaderboard } from './Leaderboard.tsx'
+import { JoinPrompt, PowerGuide } from './PowerGuide.tsx'
 import { TeamHUD } from './TeamHUD.tsx'
 import { useDirector } from './useDirector.ts'
+import { CountdownOverlay } from './CountdownOverlay.tsx'
 import { VictoryScreen } from './VictoryScreen.tsx'
+import { SafeZoneGuide } from './SafeZoneGuide.tsx'
+import type { PowerFlash } from '../types/Battle.ts'
 
-export function BattleHUD() {
+export function BattleHUD({ showSafeZones = false, showTikTokPreview = false }: { showSafeZones?: boolean; showTikTokPreview?: boolean }) {
   const hud = useDirector()
+  const total = hud.red.health + hud.blue.health
+  const redShare = total <= 0 ? 50 : Math.round((hud.red.health / total) * 100)
+  const blueShare = total <= 0 ? 50 : 100 - redShare
   return (
     <div className="hud">
-      <header className="top-hud">
-        <TeamHUD team={hud.red} side="left" />
+      <header className="top-hud scoreboard">
+        <TeamHUD team={hud.red} side="left" share={redShare} />
         <BattleTimer hud={hud} />
-        <TeamHUD team={hud.blue} side="right" />
+        <TeamHUD team={hud.blue} side="right" share={blueShare} />
       </header>
+      <JoinPrompt />
+      <PowerGuide />
+      <ReservePills />
+      <PowerNotice flash={hud.powerFlash} />
       {hud.rush && (
         <div key={hud.rush.id} className={`rush team-${hud.rush.team}`}>
           {hud.rush.label}
@@ -30,13 +38,33 @@ export function BattleHUD() {
         </div>
       )}
       <ComboDisplay combos={hud.combos} />
-      <Announcement announcement={hud.announcement} />
-      <div className={`bottom-stack ${hud.feed.length === 0 ? 'solo' : ''}`}>
-        {hud.feed.length > 0 && <EventFeed items={hud.feed} />}
-        <Leaderboard entries={hud.leaderboard} />
-      </div>
       {hud.selected && <SelectedFighter player={hud.selected} />}
       <VictoryScreen victory={hud.victory} />
+      <CountdownOverlay countdown={hud.countdown} />
+      <SafeZoneGuide zones={showSafeZones} preview={showTikTokPreview} />
+    </div>
+  )
+}
+
+function ReservePills() {
+  const red = director.players.reserves.red
+  const blue = director.players.reserves.blue
+  if (red <= 0 && blue <= 0) return null
+  return (
+    <>
+      {red > 0 && <span className="reserve-pill side-left">+{red}</span>}
+      {blue > 0 && <span className="reserve-pill side-right">+{blue}</span>}
+    </>
+  )
+}
+
+function PowerNotice({ flash }: { flash: PowerFlash | null }) {
+  if (!flash) return null
+  return (
+    <div key={flash.id} className="power-notice" role="status">
+      {flash.image ? <img src={flash.image} alt="" /> : <span>{flash.icon}</span>}
+      <strong>{flash.name}</strong>
+      <em>{flash.attack}</em>
     </div>
   )
 }
@@ -47,7 +75,7 @@ function SelectedFighter({ player }: { player: LeaderboardEntry }) {
       <img src={player.avatarUrl} alt="" />
       <div>
         <strong>@{player.username}</strong>
-        <span>{player.team === 'red' ? 'Red' : 'Blue'}</span>
+        <span>{player.team === 'red' ? 'Canada' : 'USA'}</span>
         <p>
           {formatScore(player.battlePoints)} pts · {formatScore(player.damageDealt)} damage · {player.giftCount} gifts ·{' '}
           {player.largestCombo}× combo

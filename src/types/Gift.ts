@@ -23,6 +23,9 @@ export type AttackType =
   | 'sword'
   | 'firestorm'
   | 'pulse'
+  | 'follow_blast'
+  | 'share_shot'
+  | 'ice'
 
 export type ShakeLevel = 'none' | 'small' | 'medium' | 'large' | 'legendary'
 

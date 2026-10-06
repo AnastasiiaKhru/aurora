@@ -13,6 +13,7 @@ export interface Player {
   giftCount: number
   largestCombo: number
   joinedAt: number
+  isNpc?: boolean
 }
 
 export interface LeaderboardEntry {

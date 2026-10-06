@@ -1,70 +1,125 @@
-const canvases = new Map<string, HTMLCanvasElement>()
-const urls = new Map<string, string>()
+import type { TeamId } from '../types/Team.ts'
 
-export function avatarCanvas(key: string): HTMLCanvasElement | undefined {
-  return canvases.get(key)
+const PORTRAITS = 60
+/** 47.jpg is a byte-for-byte copy of 45.jpg, so it stays out of the pool. */
+const SKIP = new Set([47])
+
+const POOL: string[] = []
+for (let slot = 1; slot <= PORTRAITS; slot += 1) {
+  if (SKIP.has(slot)) continue
+  POOL.push(String(slot).padStart(2, '0'))
+}
+
+interface PortraitUse {
+  red: number
+  blue: number
+}
+
+const owners = new Map<string, { file: string; team: TeamId }>()
+const usage = new Map<string, PortraitUse>()
+
+function emptyUse(): PortraitUse {
+  return { red: 0, blue: 0 }
+}
+
+function localArt(file: string): { key: string; url: string } {
+  return { key: `local:${file}`, url: `/avatars/${file}.jpg` }
+}
+
+function fileOf(url: string): string | null {
+  const match = /\/avatars\/(\d+)\.(?:jpg|jpeg|png|webp)$/i.exec(url.trim())
+  if (!match) return null
+  const slot = Number(match[1])
+  if (!Number.isFinite(slot) || slot < 1 || slot > PORTRAITS || SKIP.has(slot)) return null
+  return String(slot).padStart(2, '0')
+}
+
+function useOf(file: string): PortraitUse {
+  let row = usage.get(file)
+  if (!row) {
+    row = emptyUse()
+    usage.set(file, row)
+  }
+  return row
+}
+
+function assign(id: string, team: TeamId, file: string): void {
+  const previous = owners.get(id)
+  if (previous?.file === file && previous.team === team) return
+  if (previous) releaseDummyAvatar(id)
+  owners.set(id, { file, team })
+  useOf(file)[team] += 1
+}
+
+export function resetDummyAvatars(): void {
+  owners.clear()
+  usage.clear()
+}
+
+export function releaseDummyAvatar(id: string): void {
+  const owned = owners.get(id)
+  if (!owned) return
+  owners.delete(id)
+  const row = usage.get(owned.file)
+  if (!row) return
+  row[owned.team] = Math.max(0, row[owned.team] - 1)
+  if (row.red <= 0 && row.blue <= 0) usage.delete(owned.file)
+}
+
+export function claimDummyAvatar(id: string, team: TeamId, preferredUrl = ''): { key: string; url: string } {
+  const owned = owners.get(id)
+  if (owned) return localArt(owned.file)
+
+  const preferred = fileOf(preferredUrl)
+  if (preferred && !usage.has(preferred)) {
+    assign(id, team, preferred)
+    return localArt(preferred)
+  }
+
+  for (const file of POOL) {
+    if (usage.has(file)) continue
+    assign(id, team, file)
+    return localArt(file)
+  }
+
+  let best = POOL[0] ?? '01'
+  let bestOpposite = Number.POSITIVE_INFINITY
+  let bestOwn = Number.POSITIVE_INFINITY
+  for (const file of POOL) {
+    const row = usage.get(file) ?? emptyUse()
+    const other = team === 'red' ? row.blue : row.red
+    const own = row[team]
+    if (other < bestOpposite || (other === bestOpposite && own < bestOwn)) {
+      best = file
+      bestOpposite = other
+      bestOwn = own
+    }
+  }
+  assign(id, team, best)
+  return localArt(best)
+}
+
+export function safeAvatarUrl(url: string, initials: string, hue: number, seed: number): { key: string; url: string } {
+  const trimmed = url.trim()
+  if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
+    return { key: `remote:${trimmed}`, url: trimmed }
+  }
+  const local = fileOf(trimmed)
+  if (local) return localArt(local)
+  if (trimmed.startsWith('/')) return { key: `local:${trimmed}`, url: trimmed }
+  return makeAvatar(initials, hue, seed)
 }
 
 export function makeAvatar(initials: string, hue: number, seed: number): { key: string; url: string } {
-  const key = `${seed}-${hue}-${initials}`
-  const cached = urls.get(key)
-  if (cached) return { key, url: cached }
-
-  const canvas = document.createElement('canvas')
-  canvas.width = 256
-  canvas.height = 256
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    urls.set(key, '')
-    return { key, url: '' }
+  const start = Math.abs(seed + initials.length * 13 + hue) % POOL.length
+  for (let step = 0; step < POOL.length; step += 1) {
+    const file = POOL[(start + step) % POOL.length] ?? '01'
+    if (!usage.has(file)) return localArt(file)
   }
+  return localArt(POOL[start] ?? '01')
+}
 
-  const style = seed % 3
-  ctx.fillStyle = `hsl(${hue} 42% 22%)`
-  ctx.fillRect(0, 0, 256, 256)
-
-  for (let i = 0; i < 4; i += 1) {
-    const x = (seed * (i + 3) * 47) % 256
-    const y = (seed * (i + 5) * 29) % 256
-    const radius = 70 + ((seed + i * 17) % 50)
-    const blobHue = (hue + (style === 1 ? 18 : -12) + i * 16) % 360
-    const gradient = ctx.createRadialGradient(x, y, 8, x, y, radius)
-    gradient.addColorStop(0, `hsla(${blobHue} 62% ${58 + (i % 2) * 8}% / 0.92)`)
-    gradient.addColorStop(1, `hsla(${blobHue} 62% 48% / 0)`)
-    ctx.fillStyle = gradient
-    ctx.beginPath()
-    ctx.arc(x, y, radius, 0, Math.PI * 2)
-    ctx.fill()
-  }
-
-  if (style === 2) {
-    ctx.strokeStyle = 'rgba(255,255,255,0.18)'
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.arc(128, 118, 78, 0, Math.PI * 2)
-    ctx.stroke()
-  }
-
-  const sheen = ctx.createLinearGradient(0, 0, 256, 220)
-  sheen.addColorStop(0, 'rgba(255,255,255,0.22)')
-  sheen.addColorStop(0.45, 'rgba(255,255,255,0)')
-  ctx.fillStyle = sheen
-  ctx.fillRect(0, 0, 256, 256)
-
-  const vignette = ctx.createRadialGradient(128, 118, 40, 128, 128, 150)
-  vignette.addColorStop(0, 'rgba(0,0,0,0)')
-  vignette.addColorStop(1, 'rgba(0,0,0,0.38)')
-  ctx.fillStyle = vignette
-  ctx.fillRect(0, 0, 256, 256)
-
-  ctx.fillStyle = 'rgba(255,248,240,0.95)'
-  ctx.font = '600 92px Outfit, sans-serif'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillText(initials.slice(0, 2), 128, 136)
-
-  canvases.set(key, canvas)
-  const url = canvas.toDataURL('image/png')
-  urls.set(key, url)
-  return { key, url }
+export function isRemoteAvatar(url: string): boolean {
+  const trimmed = url.trim()
+  return trimmed.startsWith('https://') || trimmed.startsWith('http://')
 }

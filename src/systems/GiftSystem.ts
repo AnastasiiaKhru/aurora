@@ -42,4 +42,8 @@ export class GiftSystem {
   clear(): void {
     this.pending.clear()
   }
+
+  get queued(): number {
+    return this.pending.size
+  }
 }

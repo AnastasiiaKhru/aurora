@@ -31,7 +31,7 @@ export class MomentumSystem {
     this.rush = {
       id: `rush-${this.nonce++}`,
       team,
-      label: team === 'red' ? 'RED RUSH' : 'BLUE RUSH',
+      label: team === 'red' ? 'CANADA RUSH' : 'USA RUSH',
     }
     return this.rush
   }
@@ -47,4 +47,27 @@ export class MomentumSystem {
     this.rushUntil = 0
     this.recent = []
   }
+
+  capture(now: number): MomentumSave {
+    return {
+      rushLeft: Math.max(0, this.rushUntil - now),
+      nonce: this.nonce,
+      recent: this.recent.map((ping) => ({ team: ping.team, userId: ping.userId, age: Math.max(0, now - ping.at) })),
+    }
+  }
+
+  restore(save: MomentumSave | null | undefined, now: number): void {
+    if (!save) return
+    this.rushUntil = now + Math.max(0, save.rushLeft || 0)
+    this.nonce = save.nonce || this.nonce
+    this.recent = (save.recent ?? [])
+      .filter((ping) => ping.age <= battleConfig.rushWindowMs)
+      .map((ping) => ({ team: ping.team, userId: ping.userId, at: now - ping.age }))
+  }
+}
+
+export interface MomentumSave {
+  rushLeft: number
+  nonce: number
+  recent: { team: TeamId; userId: string; age: number }[]
 }

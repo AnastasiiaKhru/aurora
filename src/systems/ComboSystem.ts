@@ -38,6 +38,30 @@ export class ComboSystem {
   reset(): void {
     this.tracks.clear()
   }
+
+  capture(now: number): ComboSave[] {
+    return [...this.tracks].map(([key, track]) => ({
+      key,
+      count: track.count,
+      announced: track.announced,
+      age: Math.max(0, now - track.lastAt),
+    }))
+  }
+
+  restore(rows: ComboSave[], now: number): void {
+    this.tracks.clear()
+    for (const row of rows) {
+      if (row.age > battleConfig.comboWindowMs) continue
+      this.tracks.set(row.key, { count: row.count, lastAt: now - row.age, announced: row.announced })
+    }
+  }
+}
+
+export interface ComboSave {
+  key: string
+  count: number
+  announced: number
+  age: number
 }
 
 function nextMilestone(previous: number, total: number): number | null {

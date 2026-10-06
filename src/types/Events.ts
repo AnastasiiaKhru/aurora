@@ -8,8 +8,11 @@ export interface GiftEvent {
   giftId: string
   giftName: string
   giftCount: number
+  visualCount?: number
   coinValue?: number
   repeatEnd?: boolean
+  preview?: boolean
+  image?: string
 }
 
 export type BattleFeedTone = 'neutral' | 'red' | 'blue' | 'gold'

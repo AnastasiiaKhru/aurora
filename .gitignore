@@ -8,9 +8,17 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+scripts/studio-host/bin
+scripts/studio-host/obj
 dist
 dist-ssr
 *.local
+.env
+.env.*
+!.env.example
+
+# Licensed background music supplied locally. Never commit a commercial track.
+public/audio/background-track.mp3
 
 # Editor directories and files
 .vscode/*

@@ -13,3 +13,22 @@ export function resolveTeam(
 export function otherTeam(team: TeamId): TeamId {
   return team === 'red' ? 'blue' : 'red'
 }
+
+export function teamCommand(text: string): TeamId | null {
+  const command = text.trim().toLowerCase().replace(/[\u200b-\u200d\ufeff]/g, '')
+  const isCanadaCommand = command === 'c' || command === 'canada'
+  const isUsaCommand =
+    command === 'u' ||
+    command === 'usa' ||
+    command === 'u.s.a.' ||
+    command === 'united states'
+  if (isCanadaCommand) return 'red'
+  if (isUsaCommand) return 'blue'
+  return null
+}
+
+export function chatAction(text: string): { type: 'join'; team: TeamId } | { type: 'comment' } {
+  const team = teamCommand(text)
+  if (team) return { type: 'join', team }
+  return { type: 'comment' }
+}

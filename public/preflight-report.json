@@ -1,0 +1,18 @@
+{
+  "generatedAt": "2026-10-06T01:36:04.632Z",
+  "checks": {
+    "join": "pass",
+    "interactions": "pass",
+    "gifts": "pass",
+    "reset": "pass",
+    "zones": "pass"
+  },
+  "details": {
+    "join": "Chat commands, locks, and rejoin passed",
+    "interactions": "Likes, follow, share, and duplicate events passed",
+    "gifts": "Gift mappings and the ten attacks resolved",
+    "reset": "Ten battles reset in a row",
+    "zones": "9:16 stage and safe zones hold at every capture size"
+  },
+  "liveSafe": false
+}

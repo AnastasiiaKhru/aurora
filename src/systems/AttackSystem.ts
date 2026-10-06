@@ -12,7 +12,25 @@ export class AttackSystem {
   private nextId = 1
 
   get winding(): boolean {
-    return this.windup.length > 0
+    return this.windup.some((item) => item.command.rarity === 'legendary')
+  }
+
+  get pending(): number {
+    return this.queue.length + this.windup.length
+  }
+
+  private readonly known = new Set<number>()
+
+  adopt(command: AttackCommand, delayMs = 0): void {
+    if (this.known.has(command.id)) return
+    this.known.add(command.id)
+    if (this.known.size > 240) {
+      const oldest = this.known.values().next().value
+      if (oldest != null) this.known.delete(oldest)
+    }
+    this.nextId = Math.max(this.nextId, command.id + 1)
+    if (delayMs > 0) this.windup.push({ command, releaseAt: performance.now() + delayMs })
+    else this.insert(command)
   }
 
   enqueue(command: Omit<AttackCommand, 'id'>, delayMs = 0): AttackCommand {
@@ -38,17 +56,27 @@ export class AttackSystem {
 
   pull(activeCount: number): AttackCommand[] {
     const out: AttackCommand[] = []
-    let budget = Math.min(3, Math.max(0, battleConfig.maxActiveEffects - activeCount))
-    while (this.queue.length > 0 && budget > 0) {
-      const next = this.queue[0]
+    let heavy = Math.min(4, Math.max(1, battleConfig.maxActiveEffects - Math.min(activeCount, battleConfig.maxActiveEffects)))
+    let lights = 40
+    let index = 0
+    while (index < this.queue.length && (heavy > 0 || lights > 0)) {
+      const next = this.queue[index]
       if (!next) break
-      const highWaiting = this.queue.some((item) => item.priority >= 4)
-      if (next.priority < 4 && highWaiting && activeCount + out.length >= battleConfig.maxActiveEffects - 3) break
-      this.queue.shift()
+      if (next.giftName === 'Like') {
+        if (lights <= 0) {
+          index += 1
+          continue
+        }
+        this.queue.splice(index, 1)
+        out.push(next)
+        lights -= 1
+        continue
+      }
+      if (heavy <= 0) break
+      this.queue.splice(index, 1)
       out.push(next)
-      budget -= 1
+      heavy -= 1
     }
-    if (this.queue.length > 18) this.collapse()
     return out
   }
 
@@ -63,30 +91,4 @@ export class AttackSystem {
     this.queue.splice(index, 0, command)
   }
 
-  private collapse(): void {
-    const kept: AttackCommand[] = []
-    const merged = new Map<string, AttackCommand>()
-    for (const command of this.queue) {
-      if (command.priority > 2) {
-        kept.push(command)
-        continue
-      }
-      const key = command.team
-      const existing = merged.get(key)
-      if (!existing) {
-        merged.set(key, {
-          ...command,
-          attackType: 'energy_bullet',
-          damage: command.damage,
-          intensity: Math.min(1.6, command.intensity + 0.25),
-          giftName: 'Barrage',
-          priority: 2,
-        })
-      } else {
-        existing.damage += command.damage
-        existing.intensity = Math.min(1.8, existing.intensity + 0.05)
-      }
-    }
-    this.queue = [...merged.values(), ...kept].sort((a, b) => b.priority - a.priority)
-  }
 }

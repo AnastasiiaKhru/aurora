@@ -1,4 +1,5 @@
 import { Application } from 'pixi.js'
+import { DESIGN_HEIGHT, DESIGN_WIDTH, isCaptureMode, renderResolution } from '../broadcast/stage.ts'
 import { director } from '../systems/GameDirector.ts'
 import { AttackRenderer } from './AttackRenderer.ts'
 import { EffectsRenderer } from './EffectsRenderer.ts'
@@ -14,15 +15,24 @@ export class BattlefieldApp {
 
   async start(host: HTMLElement): Promise<void> {
     const app = new Application()
-    await app.init({
+    const resolution = renderResolution()
+    const capture = isCaptureMode()
+    const options = {
       backgroundAlpha: 0,
       antialias: true,
-      resolution: Math.min(window.devicePixelRatio || 1, 1.5),
       autoDensity: true,
-      resizeTo: host,
-      preference: 'webgl',
-      powerPreference: 'high-performance',
-    })
+      width: DESIGN_WIDTH,
+      height: DESIGN_HEIGHT,
+      resolution,
+      powerPreference: 'high-performance' as const,
+      ...(capture ? {} : { resizeTo: host }),
+    }
+    try {
+      await app.init({ ...options, preference: 'webgl' })
+    } catch {
+      await app.init({ ...options, resolution: 1, preference: 'webgl' })
+    }
+    if (capture) app.renderer.resize(DESIGN_WIDTH, DESIGN_HEIGHT)
     if (this.destroyed) {
       app.destroy({ removeView: true }, { children: true })
       return
@@ -66,7 +76,8 @@ export class BattlefieldApp {
     const dt = Math.min(0.05, app.ticker.deltaMS / 1000)
     const width = app.screen.width
     const height = app.screen.height
-    const combatDt = director.battle.status === 'paused' ? 0 : dt
+    const status = director.battle.status
+    const combatDt = status === 'running' ? dt : 0
     effects.update(dt, width, height)
     players.sync(width, height, effects.time)
     attacks.update(combatDt, width, height)

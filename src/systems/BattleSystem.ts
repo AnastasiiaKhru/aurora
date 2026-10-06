@@ -1,5 +1,5 @@
 import { battleConfig } from '../config/battleConfig.ts'
-import type { BattleStatus, TimerPhase, VictoryState, WinCondition } from '../types/Battle.ts'
+import type { BattleStatus, TimerPhase, VictoryPortrait, VictoryResult, VictoryState, WinCondition } from '../types/Battle.ts'
 import type { LeaderboardEntry } from '../types/Player.ts'
 import type { TeamId, TeamState } from '../types/Team.ts'
 
@@ -7,11 +7,12 @@ export interface TimerSignals {
   changed: boolean
   enteredRush: boolean
   finalSecond: number | null
-  justFinished: boolean
+  expired: boolean
+  roundOver: boolean
 }
 
 export class BattleSystem {
-  status: BattleStatus = 'running'
+  status: BattleStatus = 'countdown'
   endless = true
   elapsedMs = 0
   durationMs = battleConfig.defaultDurationMs
@@ -19,6 +20,8 @@ export class BattleSystem {
   phase: TimerPhase = 'normal'
   winCondition: WinCondition = battleConfig.winCondition
   victory: VictoryState | null = null
+  victoryElapsed = 0
+  victoryEndsAt = 0
   finishingLeft = 0
   finalTen: { value: number; nonce: number } | null = null
   red: TeamState
@@ -35,8 +38,14 @@ export class BattleSystem {
     return id === 'red' ? this.red : this.blue
   }
 
-  tick(dt: number, leaders: () => LeaderboardEntry[]): TimerSignals {
-    const signals: TimerSignals = { changed: false, enteredRush: false, finalSecond: null, justFinished: false }
+  tick(dt: number): TimerSignals {
+    const signals: TimerSignals = { changed: false, enteredRush: false, finalSecond: null, expired: false, roundOver: false }
+    if (this.status === 'victory') {
+      if (this.victoryEndsAt <= 0) this.victoryEndsAt = Date.now() + battleConfig.victoryHoldMs
+      this.victoryElapsed = Math.max(0, Math.min(battleConfig.victoryHoldMs, Date.now() - (this.victoryEndsAt - battleConfig.victoryHoldMs)))
+      if (Date.now() >= this.victoryEndsAt) signals.roundOver = true
+      return signals
+    }
     if (this.status === 'running' && this.endless) {
       this.elapsedMs += dt * 1000
       if (this.phase !== 'normal') {
@@ -61,29 +70,71 @@ export class BattleSystem {
         }
       }
       if (this.timeLeftMs <= 0) {
-        this.beginFinishing()
-        signals.changed = true
-      }
-    } else if (this.status === 'finishing') {
-      this.finishingLeft -= dt * 1000
-      if (this.finishingLeft <= 0) {
-        this.status = 'finished'
-        this.phase = 'finished'
-        this.victory = this.makeVictory(leaders())
-        signals.justFinished = true
+        this.timeLeftMs = 0
+        signals.expired = true
         signals.changed = true
       }
     }
     return signals
   }
 
-  checkWipe(): boolean {
-    if (this.winCondition !== 'destroy_territory') return false
-    if (this.status !== 'running') return false
-    if (this.red.health > 0 && this.blue.health > 0) return false
+  wipeWinner(): VictoryResult | null {
+    if (this.status !== 'running') return null
+    if (this.red.health > 0 && this.blue.health > 0) return null
+    return this.winnerFromScore()
+  }
+
+  winnerFromScore(): VictoryResult {
+    if (this.red.health <= 0 && this.blue.health > 0) return 'blue'
+    if (this.blue.health <= 0 && this.red.health > 0) return 'red'
+    if (this.red.score > this.blue.score) return 'red'
+    if (this.blue.score > this.red.score) return 'blue'
+    return 'draw'
+  }
+
+  lockVictory(result: VictoryResult, top: LeaderboardEntry[], portraits: VictoryPortrait[]): boolean {
+    if (this.status === 'victory' || this.status === 'resetting' || this.victory) return false
+    const redScore = Math.round(this.red.score)
+    const blueScore = Math.round(this.blue.score)
+    if (result === 'red') this.blue.health = 0
+    else if (result === 'blue') this.red.health = 0
+    const ranked = top.filter((entry) => entry.battlePoints > 0).slice(0, 3)
+    this.status = 'victory'
+    this.phase = 'finished'
     this.timeLeftMs = 0
-    this.beginFinishing()
+    this.finishingLeft = 0
+    this.victoryElapsed = 0
+    this.victoryEndsAt = Date.now() + battleConfig.victoryHoldMs
+    this.victory = { result, redScore, blueScore, mvp: ranked[0] ?? null, top: ranked, portraits }
     return true
+  }
+
+  markResetting(): void {
+    this.status = 'resetting'
+    this.victory = null
+    this.victoryElapsed = 0
+    this.victoryEndsAt = 0
+  }
+
+  beginCountdown(): void {
+    const endless = this.endless
+    const durationMs = this.durationMs
+    const winCondition = this.winCondition
+    this.status = 'countdown'
+    this.endless = endless
+    this.durationMs = durationMs
+    this.winCondition = winCondition
+    this.elapsedMs = 0
+    this.timeLeftMs = durationMs
+    this.phase = 'normal'
+    this.victory = null
+    this.victoryElapsed = 0
+    this.victoryEndsAt = 0
+    this.finishingLeft = 0
+    this.finalSecond = -1
+    this.finalTen = null
+    this.red = createTeam('red')
+    this.blue = createTeam('blue')
   }
 
   setDuration(ms: number): void {
@@ -94,13 +145,17 @@ export class BattleSystem {
     this.finalSecond = -1
     this.finalTen = null
     this.victory = null
-    if (this.status === 'finished' || this.status === 'finishing') this.status = 'paused'
+    this.victoryElapsed = 0
+    this.victoryEndsAt = 0
+    if (this.status === 'victory' || this.status === 'resetting') this.status = 'paused'
   }
 
   jumpTo(ms: number): void {
-    if (this.status === 'finished') return
+    if (this.status === 'victory' || this.status === 'resetting') return
     if (ms <= 0) {
-      this.stop()
+      this.endless = false
+      this.timeLeftMs = 0
+      this.status = 'running'
       return
     }
     this.endless = false
@@ -112,24 +167,12 @@ export class BattleSystem {
   }
 
   runForever(): void {
-    if (this.status === 'finished' || this.status === 'finishing') return
+    if (this.status === 'victory' || this.status === 'resetting') return
     this.endless = true
     this.phase = 'normal'
     this.finalSecond = -1
     this.finalTen = null
     this.victory = null
-  }
-
-  stop(): void {
-    this.beginFinishing()
-  }
-
-  beginFinishing(): void {
-    if (this.status === 'finishing' || this.status === 'finished') return
-    this.status = 'finishing'
-    this.phase = 'finished'
-    this.timeLeftMs = 0
-    this.finishingLeft = battleConfig.finishingMs
   }
 
   recomputePhase(): void {
@@ -139,14 +182,75 @@ export class BattleSystem {
     else this.phase = 'normal'
   }
 
+  capture(): {
+    status: BattleStatus
+    endless: boolean
+    elapsedMs: number
+    durationMs: number
+    timeLeftMs: number
+    phase: TimerPhase
+    winCondition: WinCondition
+    victory: VictoryState | null
+    victoryElapsed: number
+    victoryEndsAt: number
+    finishingLeft: number
+    finalTen: { value: number; nonce: number } | null
+    red: TeamState
+    blue: TeamState
+  } {
+    return {
+      status: this.status,
+      endless: this.endless,
+      elapsedMs: this.elapsedMs,
+      durationMs: this.durationMs,
+      timeLeftMs: this.timeLeftMs,
+      phase: this.phase,
+      winCondition: this.winCondition,
+      victory: this.victory,
+      victoryElapsed: this.victoryElapsed,
+      victoryEndsAt: this.victoryEndsAt,
+      finishingLeft: this.finishingLeft,
+      finalTen: this.finalTen,
+      red: { ...this.red },
+      blue: { ...this.blue },
+    }
+  }
+
+  apply(state: Omit<ReturnType<BattleSystem['capture']>, 'victoryEndsAt'> & { victoryEndsAt?: number }, gapMs = 0): void {
+    this.status = normalizeStatus(state.status)
+    this.endless = state.endless
+    this.durationMs = state.durationMs
+    this.phase = state.phase
+    this.winCondition = state.winCondition
+    const savedVictory = state.victory
+    this.victory = savedVictory ? { ...savedVictory, portraits: Array.isArray(savedVictory.portraits) ? savedVictory.portraits : [] } : null
+    this.finalTen = state.finalTen
+    this.red = { ...state.red }
+    this.blue = { ...state.blue }
+    this.elapsedMs = state.elapsedMs
+    this.timeLeftMs = state.timeLeftMs
+    this.finishingLeft = state.finishingLeft
+    this.victoryElapsed = typeof state.victoryElapsed === 'number' ? state.victoryElapsed : 0
+    this.victoryEndsAt = typeof state.victoryEndsAt === 'number' ? state.victoryEndsAt : 0
+    if (this.status === 'victory' && this.victoryEndsAt <= 0) {
+      const remain = Math.max(0, battleConfig.victoryHoldMs - this.victoryElapsed)
+      this.victoryEndsAt = Date.now() + remain
+    }
+    if (gapMs <= 0) return
+    if (this.status === 'running' && this.endless) this.elapsedMs += gapMs
+    else if (this.status === 'running') this.timeLeftMs = Math.max(0, this.timeLeftMs - gapMs)
+  }
+
   reset(): void {
-    this.status = 'running'
+    this.status = 'countdown'
     this.endless = true
     this.elapsedMs = 0
     this.durationMs = battleConfig.defaultDurationMs
     this.timeLeftMs = this.durationMs
     this.phase = 'normal'
     this.victory = null
+    this.victoryElapsed = 0
+    this.victoryEndsAt = 0
     this.finishingLeft = 0
     this.finalSecond = -1
     this.finalTen = null
@@ -154,17 +258,12 @@ export class BattleSystem {
     this.blue = createTeam('blue')
   }
 
-  private makeVictory(leaders: LeaderboardEntry[]): VictoryState {
-    const redScore = Math.round(this.red.score)
-    const blueScore = Math.round(this.blue.score)
-    let result: VictoryState['result'] = 'draw'
-    if (this.winCondition === 'destroy_territory' && this.red.health <= 0 && this.blue.health > 0) result = 'blue'
-    else if (this.winCondition === 'destroy_territory' && this.blue.health <= 0 && this.red.health > 0) result = 'red'
-    else if (redScore > blueScore) result = 'red'
-    else if (blueScore > redScore) result = 'blue'
-    const mvp = leaders.find((entry) => entry.battlePoints > 0) ?? null
-    return { result, redScore, blueScore, mvp, top: leaders.slice(0, 3) }
-  }
+}
+
+function normalizeStatus(status: string): BattleStatus {
+  if (status === 'finishing' || status === 'finished' || status === 'victory') return 'victory'
+  if (status === 'running' || status === 'paused' || status === 'countdown' || status === 'resetting') return status
+  return 'countdown'
 }
 
 function createTeam(id: TeamId): TeamState {
