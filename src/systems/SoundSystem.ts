@@ -25,6 +25,7 @@ export type SfxName =
   | 'hit-small'
   | 'hit-medium'
   | 'hit-large'
+  | 'hit-max'
   | 'projectile'
   | 'laser'
   | 'missile-launch'
@@ -64,6 +65,7 @@ interface Voice {
   started: number
   source: AudioBufferSourceNode
   gain: GainNode
+  level?: number
 }
 
 const MAX_VOICES = 6
@@ -160,6 +162,7 @@ export class SoundManager {
   private voices: Voice[] = []
   private attackVoices: Voice[] = []
   private readonly attackLast = new Map<string, number>()
+  private attackDuckUntil = 0
   readonly background = new BackgroundMusic()
   private readonly ducks = new AttackSoundController(this.background)
   private page: 'battle' | 'admin' | 'none' = 'none'
@@ -678,7 +681,7 @@ export class SoundManager {
     }
     const scene = cinemaOf(command)
     if (scene) {
-      this.playAttack('atk-big', attackLab.volume, 3, 0)
+      this.playAttack('atk-big', attackLab.volume, 3, 0, 'special')
       this.duck(scene.scale >= 1.5 ? 1.1 : 0.7)
       return
     }
@@ -692,7 +695,7 @@ export class SoundManager {
     }
     const scene = cinemaOf(command)
     if (scene) {
-      this.playAttack('hit-large', 0.9 * attackLab.volume, 3, 0)
+      this.playAttack('hit-max', 0.88 * attackLab.volume, 2, 0, 'special')
       return
     }
     this.playStyle(styleOf(command), 'hit', command.team)
@@ -705,20 +708,22 @@ export class SoundManager {
   private playNpc(kind: 'maple' | 'star', phase: 'cast' | 'hit', _team: TeamId): void {
     const real = phase === 'cast' ? 0.32 : 0.22
     const file: SfxName = phase === 'cast' ? (kind === 'maple' ? 'atk-follow' : 'atk-like') : 'hit-small'
-    this.playAttack(file, real * 0.6 * attackLab.volume, 4, 0)
+    const weight: AttackWeight = file === 'atk-like' || file === 'hit-small' ? 'basic' : 'medium'
+    this.playAttack(file, real * 0.6 * attackLab.volume, 4, 0, weight)
     if (phase === 'cast') this.ducks.cueSoft()
   }
 
   private playStyle(style: AttackStyle, phase: 'cast' | 'hit', _team: TeamId): void {
     const cue = phase === 'cast' ? CAST_CUE[style] : HIT_CUE[style]
     const gain = attackLab.volume * (attackLab.volumes[style] ?? 1)
-    this.playAttack(cue.file, cue.amount * gain, cue.voices, cue.cooldown)
+    const weight = ATTACK_WEIGHT[style]
+    this.playAttack(cue.file, cue.amount * gain, cue.voices, cue.cooldown, weight)
     if (phase === 'cast' && this.background.hasAudio()) this.ducks.cue(style)
     else if (phase === 'cast' && (style === 'eclipse' || style === 'planet' || style === 'crystal')) this.duck(style === 'eclipse' ? 0.45 : 0.8)
   }
 
   /** Overlapping attack voices. A new like never cuts off one that is still playing. */
-  private playAttack(name: SfxName, amount: number, pool: number, cooldown: number): void {
+  private playAttack(name: SfxName, amount: number, pool: number, cooldown: number, weight: AttackWeight = 'medium'): void {
     if (this.muted || !(amount > 0)) return
     if (this.page === 'battle') this.wakeBattleAudio()
     const ctx = this.ensure()
@@ -728,11 +733,11 @@ export class SoundManager {
     const begin = (buffer: AudioBuffer) => {
       const run = () => {
         if (ctx.state === 'running') {
-          this.startAttack(buffer, name, amount, pool, cooldown)
+          this.startAttack(buffer, name, amount, pool, cooldown, weight)
           return
         }
         void ctx.resume().then(() => {
-          if (ctx.state === 'running') this.startAttack(buffer, name, amount, pool, cooldown)
+          if (ctx.state === 'running') this.startAttack(buffer, name, amount, pool, cooldown, weight)
         }).catch(() => undefined)
       }
       run()
@@ -747,7 +752,7 @@ export class SoundManager {
     })
   }
 
-  private startAttack(buffer: AudioBuffer, key: string, amount: number, pool: number, cooldown: number): void {
+  private startAttack(buffer: AudioBuffer, key: string, amount: number, pool: number, cooldown: number, weight: AttackWeight): void {
     const ctx = this.ctx
     const bus = this.sfxGain
     if (!ctx || !bus) return
@@ -760,13 +765,16 @@ export class SoundManager {
     const source = ctx.createBufferSource()
     const gain = ctx.createGain()
     source.buffer = buffer
-    source.playbackRate.value = 0.97 + Math.random() * 0.06
-    const spread = 0.98 + Math.random() * 0.04
+    const basic = weight === 'basic'
+    source.playbackRate.value = basic ? 0.975 + Math.random() * 0.05 : 0.992 + Math.random() * 0.016
+    const spread = basic ? 0.94 + Math.random() * 0.1 : 0.99 + Math.random() * 0.02
     const level = Math.max(0, amount) * spread
-    gain.gain.setValueAtTime(level, now)
+    const ducked = basic && now < this.attackDuckUntil
+    gain.gain.setValueAtTime(ducked ? level * 0.42 : level, now)
+    if (ducked) gain.gain.linearRampToValueAtTime(level, this.attackDuckUntil)
     source.connect(gain)
     gain.connect(bus)
-    const voice: Voice = { key, priority: 1, started: now, source, gain }
+    const voice: Voice = { key, priority: 1, started: now, source, gain, level }
     this.attackVoices.push(voice)
     this.attackLast.set(key, now)
     source.onended = () => {
@@ -783,6 +791,25 @@ export class SoundManager {
       source.start(now)
     } catch (error) {
       this.noteError(key, error)
+    }
+    if (weight === 'strong' || weight === 'special') this.duckBasicAttacks(weight === 'special' ? 0.62 : 0.38)
+  }
+
+  /** Pull like-shots down while a heavy attack is speaking. The likes keep playing. */
+  private duckBasicAttacks(seconds: number): void {
+    const ctx = this.ctx
+    if (!ctx) return
+    const now = ctx.currentTime
+    this.attackDuckUntil = Math.max(this.attackDuckUntil, now + seconds)
+    for (const voice of this.attackVoices) {
+      if (voice.key !== 'atk-like' && voice.key !== 'hit-small') continue
+      const full = voice.level ?? voice.gain.gain.value
+      voice.level = full
+      const gain = voice.gain.gain
+      gain.cancelScheduledValues(now)
+      gain.setValueAtTime(Math.max(0.0001, gain.value), now)
+      gain.linearRampToValueAtTime(full * 0.42, now + 0.025)
+      gain.linearRampToValueAtTime(full, this.attackDuckUntil)
     }
   }
 
@@ -1140,6 +1167,7 @@ function sfxNames(): SfxName[] {
     'hit-small',
     'hit-medium',
     'hit-large',
+    'hit-max',
     'projectile',
     'laser',
     'missile-launch',
@@ -1177,29 +1205,44 @@ interface Cue {
 }
 
 const CAST_CUE: Record<AttackStyle, Cue> = {
-  pulse: { file: 'atk-like', priority: 1, cooldown: 0, voices: 12, amount: 0.52 },
-  comet: { file: 'atk-follow', priority: 2, cooldown: 0, voices: 4, amount: 0.66 },
-  portal: { file: 'atk-share', priority: 2, cooldown: 0, voices: 4, amount: 0.76 },
-  rose: { file: 'atk-small', priority: 2, cooldown: 0, voices: 3, amount: 0.86 },
-  maple: { file: 'atk-big', priority: 3, cooldown: 0, voices: 2, amount: 1 },
-  star: { file: 'atk-medium', priority: 3, cooldown: 0, voices: 3, amount: 0.94 },
-  vortex: { file: 'atk-big', priority: 3, cooldown: 0, voices: 2, amount: 1 },
+  pulse: { file: 'atk-like', priority: 1, cooldown: 0, voices: 12, amount: 0.5 },
+  comet: { file: 'atk-follow', priority: 2, cooldown: 0, voices: 4, amount: 0.62 },
+  portal: { file: 'atk-share', priority: 2, cooldown: 0, voices: 4, amount: 0.66 },
+  rose: { file: 'atk-small', priority: 2, cooldown: 0, voices: 3, amount: 0.72 },
+  maple: { file: 'atk-medium', priority: 3, cooldown: 0, voices: 3, amount: 0.86 },
+  star: { file: 'atk-medium', priority: 3, cooldown: 0, voices: 3, amount: 0.82 },
+  vortex: { file: 'atk-big', priority: 4, cooldown: 0, voices: 2, amount: 0.96 },
   planet: { file: 'atk-big', priority: 4, cooldown: 0, voices: 2, amount: 1 },
-  crystal: { file: 'atk-big', priority: 4, cooldown: 0, voices: 2, amount: 1 },
+  crystal: { file: 'atk-big', priority: 4, cooldown: 0, voices: 2, amount: 0.98 },
   eclipse: { file: 'atk-big', priority: 4, cooldown: 0, voices: 2, amount: 1 },
 }
 
 const HIT_CUE: Record<AttackStyle, Cue> = {
-  pulse: { file: 'hit-small', priority: 1, cooldown: 0, voices: 10, amount: 0.4 },
-  comet: { file: 'hit-medium', priority: 2, cooldown: 0, voices: 4, amount: 0.55 },
-  portal: { file: 'hit-medium', priority: 2, cooldown: 0, voices: 4, amount: 0.58 },
-  rose: { file: 'hit-medium', priority: 2, cooldown: 0, voices: 3, amount: 0.68 },
-  maple: { file: 'hit-large', priority: 3, cooldown: 0, voices: 2, amount: 0.86 },
-  star: { file: 'hit-large', priority: 3, cooldown: 0, voices: 3, amount: 0.78 },
-  vortex: { file: 'hit-large', priority: 3, cooldown: 0, voices: 2, amount: 0.86 },
-  planet: { file: 'hit-large', priority: 4, cooldown: 0, voices: 2, amount: 0.95 },
-  crystal: { file: 'hit-large', priority: 4, cooldown: 0, voices: 2, amount: 0.9 },
-  eclipse: { file: 'hit-large', priority: 4, cooldown: 0, voices: 2, amount: 0.95 },
+  pulse: { file: 'hit-small', priority: 1, cooldown: 0, voices: 10, amount: 0.36 },
+  comet: { file: 'hit-medium', priority: 2, cooldown: 0, voices: 4, amount: 0.5 },
+  portal: { file: 'hit-medium', priority: 2, cooldown: 0, voices: 4, amount: 0.54 },
+  rose: { file: 'hit-medium', priority: 2, cooldown: 0, voices: 3, amount: 0.58 },
+  maple: { file: 'hit-large', priority: 3, cooldown: 0, voices: 3, amount: 0.74 },
+  star: { file: 'hit-large', priority: 3, cooldown: 0, voices: 3, amount: 0.7 },
+  vortex: { file: 'hit-max', priority: 4, cooldown: 0, voices: 2, amount: 0.86 },
+  planet: { file: 'hit-max', priority: 4, cooldown: 0, voices: 2, amount: 0.92 },
+  crystal: { file: 'hit-max', priority: 4, cooldown: 0, voices: 2, amount: 0.88 },
+  eclipse: { file: 'hit-max', priority: 4, cooldown: 0, voices: 2, amount: 0.94 },
+}
+
+type AttackWeight = 'basic' | 'medium' | 'strong' | 'special'
+
+const ATTACK_WEIGHT: Record<AttackStyle, AttackWeight> = {
+  pulse: 'basic',
+  comet: 'medium',
+  portal: 'medium',
+  rose: 'medium',
+  maple: 'strong',
+  star: 'strong',
+  vortex: 'special',
+  planet: 'special',
+  crystal: 'special',
+  eclipse: 'special',
 }
 
 function clamp01(value: number): number {

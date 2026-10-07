@@ -798,7 +798,7 @@ function addBody(out, start, dur, f0, f1, amp, color = 0.28) {
 
 /** Short bass thump. Drops fast so it reads as impact, not a note. */
 function addThump(out, start, dur, f0, f1, amp) {
-  addBody(out, start, dur, f0, f1, amp, 0.12)
+  addBody(out, start, dur, f0, f1, amp, 0)
 }
 
 function addBand(out, start, dur, amp, seed, lo, hi, decay) {
@@ -832,21 +832,31 @@ function addRumble(out, start, dur, f, amp) {
     const t = i / SR
     phaseA += (TAU * f) / SR
     phaseB += (TAU * f * 0.94) / SR
-    const swell = Math.min(1, t / Math.max(0.04, dur * 0.42))
+    const swell = 0.42 + 0.58 * Math.min(1, t / Math.max(0.03, dur * 0.55))
     const tail = Math.exp(-Math.max(0, t - dur * 0.55) / Math.max(0.03, dur * 0.22))
     out[idx] += (Math.sin(phaseA) * 0.72 + Math.sin(phaseB) * 0.48) * swell * tail * amp
   }
 }
 
-/** Short inharmonic crack in the mid band. Fast enough that it never becomes a chime. */
-function addMetal(out, start, amp) {
-  const partials = [
-    [310, 0.034, 0.46],
-    [470, 0.028, 0.32],
-    [690, 0.022, 0.2],
-    [980, 0.016, 0.1],
-  ]
-  for (const [freq, dur, gain] of partials) addBody(out, start, dur, freq, freq * 0.9, amp * gain, 0.05)
+/** Rushing energy. A moving noise band, never a pitched note. */
+function addWhoosh(out, start, dur, amp, seed, fromHz, toHz) {
+  const a0 = Math.floor(start * SR)
+  const n = Math.max(1, Math.floor(dur * SR))
+  let high = 0
+  let low = 0
+  for (let i = 0; i < n; i += 1) {
+    const idx = a0 + i
+    if (idx < 0 || idx >= out.length) continue
+    const p = i / Math.max(1, n - 1)
+    const center = fromHz * (toHz / Math.max(1, fromHz)) ** p
+    const hiA = 1 - Math.exp((-TAU * Math.min(5000, center * 1.65)) / SR)
+    const loA = 1 - Math.exp((-TAU * Math.max(50, center * 0.42)) / SR)
+    const raw = noiseAt(seed + i * 7 + 3)
+    high += hiA * (raw - high)
+    low += loA * (high - low)
+    const env = Math.sin(Math.PI * Math.min(1, p)) ** 0.5
+    out[idx] += (high - low) * env * amp
+  }
 }
 
 function shaped(seconds, draw, level) {
@@ -862,15 +872,6 @@ function sum(parts) {
     for (let i = 0; i < out.length; i += 1) out[i] += part[i] ?? 0
   }
   return out
-}
-
-function krak(seconds, start, level, seed, thump = 160) {
-  return sum([
-    shaped(seconds, (out) => addClick(out, start, 0.012, 1, seed, 1050, 2300), level),
-    shaped(seconds, (out) => addMetal(out, start, 1), level * 0.72),
-    shaped(seconds, (out) => addThump(out, start, 0.065, thump, thump * 0.55, 1), level * 0.7),
-    shaped(seconds, (out) => addBand(out, start, 0.04, 1, seed + 9, 320, 980, 30), level * 0.42),
-  ])
 }
 
 function drive(out, amount) {
@@ -909,42 +910,45 @@ function bandReport(samples) {
 
 const attacks = {
   'atk-like': () => {
-    const seconds = 0.14
+    const seconds = 0.12
     return finishAttack(
       sum([
-        shaped(seconds, (out) => addClick(out, 0, 0.012, 1, 11, 1100, 2300), 0.92),
-        shaped(seconds, (out) => addBand(out, 0, 0.045, 1, 23, 280, 860, 24), 0.48),
-        shaped(seconds, (out) => addBody(out, 0.004, 0.12, 248, 168, 1, 0.55), 0.8),
-        shaped(seconds, (out) => addThump(out, 0.008, 0.09, 118, 74, 1), 0.42),
+        shaped(seconds, (out) => addClick(out, 0, 0.009, 1, 11, 1400, 2800), 0.78),
+        shaped(seconds, (out) => addBand(out, 0, 0.05, 1, 23, 340, 1200, 22), 0.95),
+        shaped(seconds, (out) => addThump(out, 0.001, 0.042, 90, 52, 1), 0.5),
+        shaped(seconds, (out) => addBand(out, 0.018, 0.09, 1, 24, 180, 520, 14), 0.28),
       ]),
-      1.2,
+      1.15,
       0.74,
     )
   },
   'atk-follow': () => {
-    const seconds = 0.22
+    const seconds = 0.26
     return finishAttack(
       sum([
-        shaped(seconds, (out) => addClick(out, 0, 0.014, 1, 31, 980, 2100), 0.95),
-        shaped(seconds, (out) => addBand(out, 0, 0.12, 1, 44, 220, 780, 8), 0.72),
-        shaped(seconds, (out) => addBody(out, 0.008, 0.16, 210, 132, 1, 0.42), 0.78),
-        shaped(seconds, (out) => addThump(out, 0.06, 0.12, 108, 58, 1), 0.62),
+        shaped(seconds, (out) => addClick(out, 0, 0.012, 1, 31, 1200, 3000), 0.72),
+        shaped(seconds, (out) => addBand(out, 0, 0.09, 1, 44, 160, 680, 9), 0.9),
+        shaped(seconds, (out) => addThump(out, 0, 0.07, 78, 42, 1), 0.58),
+        shaped(seconds, (out) => addWhoosh(out, 0.015, 0.22, 1, 45, 980, 240), 0.74),
+        shaped(seconds, (out) => addBand(out, 0.04, 0.02, 1, 46, 600, 1500, 40), 0.32),
       ]),
-      1.2,
+      1.12,
       0.78,
     )
   },
   'atk-share': () => {
-    const seconds = 0.32
+    const seconds = 0.3
     return finishAttack(
       sum([
-        shaped(seconds, (out) => addClick(out, 0, 0.012, 1, 7, 1000, 2200), 0.8),
-        shaped(seconds, (out) => addBody(out, 0, 0.14, 220, 150, 1, 0.4), 0.48),
-        krak(seconds, 0.07, 0.74, 51, 176),
-        krak(seconds, 0.15, 0.84, 63, 158),
-        krak(seconds, 0.23, 0.94, 77, 142),
+        shaped(seconds, (out) => addClick(out, 0, 0.01, 1, 7, 1300, 3200), 0.7),
+        shaped(seconds, (out) => addWhoosh(out, 0, 0.09, 1, 8, 860, 320), 0.62),
+        shaped(seconds, (out) => addWhoosh(out, 0.09, 0.09, 1, 9, 780, 280), 0.7),
+        shaped(seconds, (out) => addWhoosh(out, 0.18, 0.1, 1, 10, 700, 240), 0.78),
+        shaped(seconds, (out) => addThump(out, 0.09, 0.06, 86, 48, 1), 0.4),
+        shaped(seconds, (out) => addThump(out, 0.18, 0.07, 80, 44, 1), 0.48),
+        shaped(seconds, (out) => addBand(out, 0, 0.08, 1, 12, 180, 640, 10), 0.45),
       ]),
-      1.15,
+      1.1,
       0.8,
     )
   },
@@ -952,93 +956,121 @@ const attacks = {
     const seconds = 0.3
     return finishAttack(
       sum([
-        shaped(seconds, (out) => addClick(out, 0, 0.012, 1, 18, 900, 1900), 0.62),
-        shaped(seconds, (out) => addBand(out, 0, 0.14, 1, 28, 180, 640, 7), 0.58),
-        shaped(seconds, (out) => addBody(out, 0, 0.18, 168, 102, 1, 0.36), 0.86),
-        shaped(seconds, (out) => addThump(out, 0.01, 0.14, 92, 54, 1), 0.5),
-        krak(seconds, 0.15, 0.96, 81, 148),
+        shaped(seconds, (out) => addClick(out, 0, 0.012, 1, 18, 1100, 2800), 0.68),
+        shaped(seconds, (out) => addBand(out, 0, 0.11, 1, 28, 140, 560, 7), 0.92),
+        shaped(seconds, (out) => addThump(out, 0, 0.09, 72, 40, 1), 0.66),
+        shaped(seconds, (out) => addWhoosh(out, 0.02, 0.24, 1, 29, 820, 200), 0.7),
+        shaped(seconds, (out) => addBand(out, 0.05, 0.04, 1, 30, 500, 1400, 24), 0.36),
       ]),
-      1.18,
+      1.12,
       0.82,
     )
   },
   'atk-medium': () => {
-    const seconds = 0.42
+    const seconds = 0.48
     return finishAttack(
       sum([
-        shaped(seconds, (out) => addRumble(out, 0, 0.15, 88, 1), 0.7),
-        shaped(seconds, (out) => addBody(out, 0, 0.14, 176, 128, 1, 0.34), 0.55),
-        shaped(seconds, (out) => addBand(out, 0.1, 0.14, 1, 36, 200, 760, 7), 0.68),
-        shaped(seconds, (out) => addBody(out, 0.1, 0.14, 240, 160, 1, 0.3), 0.5),
-        shaped(seconds, (out) => addClick(out, 0.24, 0.014, 1, 52, 960, 2100), 0.95),
-        shaped(seconds, (out) => addThump(out, 0.24, 0.12, 140, 78, 1), 0.66),
-        shaped(seconds, (out) => addMetal(out, 0.24, 1), 0.92),
-        shaped(seconds, (out) => addBand(out, 0.25, 0.09, 1, 66, 280, 980, 18), 0.4),
+        shaped(seconds, (out) => addRumble(out, 0, 0.1, 70, 1), 0.62),
+        shaped(seconds, (out) => addBand(out, 0, 0.1, 1, 36, 120, 460, 6), 0.55),
+        shaped(seconds, (out) => addClick(out, 0.08, 0.014, 1, 52, 900, 2600), 0.8),
+        shaped(seconds, (out) => addBand(out, 0.08, 0.08, 1, 53, 220, 1100, 12), 0.9),
+        shaped(seconds, (out) => addThump(out, 0.08, 0.1, 88, 38, 1), 0.72),
+        shaped(seconds, (out) => addWhoosh(out, 0.12, 0.32, 1, 54, 760, 170), 0.8),
       ]),
-      1.15,
+      1.1,
       0.86,
     )
   },
-  'hit-small': () => finishAttack(krak(0.1, 0, 0.9, 9, 188), 1.25, 0.72),
-  'hit-medium': () => {
-    const seconds = 0.14
+  'hit-small': () => {
+    const seconds = 0.08
     return finishAttack(
       sum([
-        krak(seconds, 0, 0.95, 14, 168),
-        shaped(seconds, (out) => addThump(out, 0, 0.08, 120, 70, 1), 0.38),
+        shaped(seconds, (out) => addClick(out, 0, 0.008, 1, 9, 1500, 3800), 0.8),
+        shaped(seconds, (out) => addBand(out, 0, 0.04, 1, 10, 400, 1400, 30), 0.95),
+        shaped(seconds, (out) => addThump(out, 0, 0.045, 100, 58, 1), 0.48),
       ]),
-      1.2,
-      0.78,
+      1.18,
+      0.72,
+    )
+  },
+  'hit-medium': () => {
+    const seconds = 0.16
+    return finishAttack(
+      sum([
+        shaped(seconds, (out) => addClick(out, 0, 0.012, 1, 14, 1000, 2800), 0.82),
+        shaped(seconds, (out) => addBand(out, 0, 0.05, 1, 15, 300, 1200, 20), 0.9),
+        shaped(seconds, (out) => addThump(out, 0, 0.09, 84, 40, 1), 0.7),
+        shaped(seconds, (out) => addBand(out, 0.02, 0.1, 1, 16, 160, 600, 10), 0.4),
+      ]),
+      1.12,
+      0.8,
     )
   },
   'hit-large': () => {
-    const seconds = 0.22
+    const seconds = 0.26
     return finishAttack(
       sum([
-        shaped(seconds, (out) => addClick(out, 0, 0.014, 1, 21, 900, 2000), 0.95),
-        shaped(seconds, (out) => addMetal(out, 0, 1), 0.95),
-        shaped(seconds, (out) => addThump(out, 0, 0.12, 130, 64, 1), 0.62),
-        shaped(seconds, (out) => addBody(out, 0.004, 0.1, 90, 58, 1, 0.12), 0.32),
-        shaped(seconds, (out) => addBand(out, 0.01, 0.1, 1, 33, 220, 860, 14), 0.42),
+        shaped(seconds, (out) => addClick(out, 0, 0.014, 1, 21, 800, 2400), 0.85),
+        shaped(seconds, (out) => addBand(out, 0, 0.06, 1, 22, 240, 1100, 14), 0.92),
+        shaped(seconds, (out) => addThump(out, 0, 0.14, 86, 34, 1), 0.82),
+        shaped(seconds, (out) => addBand(out, 0.02, 0.16, 1, 23, 140, 520, 7), 0.48),
       ]),
-      1.15,
+      1.1,
       0.88,
     )
   },
 }
 
 function attackBig() {
-  const seconds = 0.68
+  const seconds = 0.86
   const body = sum([
-    shaped(seconds, (out) => addRumble(out, 0, 0.15, 92, 1), 0.48),
-    shaped(seconds, (out) => addBody(out, 0.01, 0.14, 168, 124, 1, 0.34), 0.58),
-    shaped(seconds, (out) => addBody(out, 0.14, 0.16, 230, 150, 1, 0.32), 0.62),
-    shaped(seconds, (out) => addThump(out, 0.3, 0.2, 120, 58, 1), 0.64),
-    shaped(seconds, (out) => addBody(out, 0.31, 0.14, 72, 46, 1, 0.1), 0.34),
+    shaped(seconds, (out) => addRumble(out, 0, 0.1, 62, 1), 0.58),
+    shaped(seconds, (out) => addBand(out, 0, 0.1, 1, 3, 110, 420, 5), 0.42),
+    shaped(seconds, (out) => addRumble(out, 0.08, 0.14, 78, 1), 0.72),
+    shaped(seconds, (out) => addBand(out, 0.08, 0.14, 1, 4, 160, 560, 6), 0.55),
+    shaped(seconds, (out) => addThump(out, 0.2, 0.16, 94, 38, 1), 0.78),
   ])
   const air = sum([
-    shaped(seconds, (out) => addBand(out, 0.12, 0.2, 1, 41, 200, 720, 6.5), 0.7),
-    shaped(seconds, (out) => addBand(out, 0.32, 0.16, 1, 12, 180, 640, 10), 0.4),
+    shaped(seconds, (out) => addWhoosh(out, 0.18, 0.2, 1, 15, 900, 240), 0.78),
+    shaped(seconds, (out) => addWhoosh(out, 0.34, 0.48, 1, 16, 620, 140), 0.86),
   ])
   const crack = sum([
-    shaped(seconds, (out) => addMetal(out, 0.3, 1), 0.9),
-    shaped(seconds, (out) => addClick(out, 0.3, 0.016, 1, 90, 1000, 2200), 0.86),
+    shaped(seconds, (out) => addClick(out, 0.2, 0.016, 1, 90, 800, 2600), 0.88),
+    shaped(seconds, (out) => addBand(out, 0.2, 0.055, 1, 91, 320, 1200, 16), 0.64),
   ])
+  return widen(body, air, crack)
+}
+
+function hitMax() {
+  const seconds = 0.42
+  const body = sum([
+    shaped(seconds, (out) => addThump(out, 0, 0.14, 90, 36, 1), 0.68),
+    shaped(seconds, (out) => addRumble(out, 0.05, 0.22, 48, 1), 0.36),
+  ])
+  const air = shaped(seconds, (out) => addBand(out, 0.012, 0.18, 1, 40, 180, 640, 8), 0.55)
+  const crack = sum([
+    shaped(seconds, (out) => addClick(out, 0, 0.014, 1, 70, 900, 2400), 0.95),
+    shaped(seconds, (out) => addBand(out, 0, 0.06, 1, 71, 320, 1300, 16), 0.9),
+  ])
+  return widen(body, air, crack)
+}
+
+function widen(body, air, crack) {
   const n = body.length
   const left = new Float32Array(n)
   const right = new Float32Array(n)
-  const delay = Math.floor(0.008 * SR)
+  const delay = Math.floor(0.009 * SR)
   for (let i = 0; i < n; i += 1) {
     const delayed = i >= delay ? i - delay : -1
     const airLate = delayed >= 0 ? air[delayed] : 0
     const crackLate = delayed >= 0 ? crack[delayed] : 0
-    left[i] = body[i] + air[i] * 0.82 + crack[i]
-    right[i] = body[i] * 0.96 + air[i] * 1.08 + airLate * 0.35 + crackLate * 0.92
+    left[i] = body[i] + air[i] * 0.8 + crack[i]
+    right[i] = body[i] * 0.96 + air[i] * 1.1 + airLate * 0.32 + crackLate * 0.9
   }
-  drive(left, 1.4)
-  drive(right, 1.4)
-  fadeTail(left, 12)
-  fadeTail(right, 12)
+  drive(left, 1.18)
+  drive(right, 1.18)
+  fadeTail(left, 14)
+  fadeTail(right, 14)
   let peak = 0
   for (let i = 0; i < n; i += 1) peak = Math.max(peak, Math.abs(left[i]), Math.abs(right[i]))
   const gain = peak > 0.00001 ? 0.9 / peak : 0
@@ -1080,13 +1112,16 @@ if (process.argv.includes('--attacks')) {
     await emit(`sfx/${name}.wav`, out)
   }
   const big = attackBig()
-  const merged = new Float32Array(big.left.length)
-  for (let i = 0; i < merged.length; i += 1) merged[i] = (big.left[i] + big.right[i]) * 0.5
-  console.log(`atk-big bands  ${bandReport(merged)}`)
-  const file = join(ROOT, 'sfx/atk-big.wav')
-  await mkdir(dirname(file), { recursive: true })
-  await writeFile(file, wavStereo(big.left, big.right))
-  console.log(`sfx/atk-big.wav\t${(big.left.length / SR).toFixed(2)}s\tstereo`)
+  const maxHit = hitMax()
+  for (const [name, pair] of [['atk-big', big], ['hit-max', maxHit]]) {
+    const merged = new Float32Array(pair.left.length)
+    for (let i = 0; i < merged.length; i += 1) merged[i] = (pair.left[i] + pair.right[i]) * 0.5
+    console.log(`${name} bands  ${bandReport(merged)}`)
+    const file = join(ROOT, `sfx/${name}.wav`)
+    await mkdir(dirname(file), { recursive: true })
+    await writeFile(file, wavStereo(pair.left, pair.right))
+    console.log(`sfx/${name}.wav\t${(pair.left.length / SR).toFixed(2)}s\tstereo`)
+  }
 } else if (process.argv.includes('--shots')) {
   for (const name of ['projectile', 'laser', 'missile-launch']) {
     await emit(`sfx/${name}.wav`, renderNamed(name, sfx[name], peaks[name] ?? 0.8))
