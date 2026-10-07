@@ -42,12 +42,9 @@ function BroadcastFrame({ className, children, native = false }: { className: st
     const stage = stageRef.current
     if (!stage) return
     const apply = () => {
-      if (native) {
-        stage.style.transform = 'none'
-        return
-      }
-      const scale = Math.min(window.innerWidth / DESIGN_WIDTH, window.innerHeight / DESIGN_HEIGHT)
-      stage.style.transform = `scale(${scale})`
+      const scale = native ? 1 : Math.min(window.innerWidth / DESIGN_WIDTH, window.innerHeight / DESIGN_HEIGHT)
+      stage.style.transform = 'none'
+      stage.style.zoom = String(scale)
     }
     apply()
     window.addEventListener('resize', apply)
@@ -56,7 +53,7 @@ function BroadcastFrame({ className, children, native = false }: { className: st
 
   return (
     <div className={className}>
-      <div className="broadcast-stage" ref={stageRef} style={native ? { transform: 'none' } : { transform: `scale(${broadcastScale()})` }}>
+      <div className="broadcast-stage" ref={stageRef} style={{ transform: 'none', zoom: native ? 1 : broadcastScale() }}>
         {children}
       </div>
     </div>
@@ -125,13 +122,18 @@ function BattleView() {
   }, [])
 
   return (
-    <BroadcastFrame native={capture} className={`broadcast-viewport shell-live${capture ? ' capture' : ''}${cursorHidden ? ' cursor-hidden' : ''}`}>
+    <BroadcastFrame native={capture} className={`broadcast-viewport shell-live battle-focus${capture ? ' capture' : ''}${cursorHidden ? ' cursor-hidden' : ''}`}>
       <div className="stage" id="aurora-stage" data-phase={hud.phase} data-status={hud.status} data-count={hud.countdown?.label ?? ''}>
         <Battlefield />
         <BattleHUD />
+        <AlisaCard />
       </div>
     </BroadcastFrame>
   )
+}
+
+function AlisaCard() {
+  return <img className="alisa-sticker" src="/alisa-sticker.png" alt="Hi! I’m Alisa. I built this game. Comment C or U to join!" />
 }
 
 function AdminView() {
@@ -207,10 +209,11 @@ function AdminView() {
   return (
     <div className="shell">
       <MusicStatusIndicator />
-      <BroadcastFrame className="broadcast-viewport shell-live">
+      <BroadcastFrame className="broadcast-viewport shell-live battle-focus">
         <div className="stage" id="aurora-stage" data-phase={hud.phase} data-status={hud.status} data-count={hud.countdown?.label ?? ''}>
           <Battlefield />
           <BattleHUD showSafeZones={safeZones} showTikTokPreview={tiktokPreview} />
+          <AlisaCard />
         </div>
       </BroadcastFrame>
       {mode === 'private' && <div className="test-mode-banner">TEST MODE</div>}

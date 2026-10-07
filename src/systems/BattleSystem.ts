@@ -211,8 +211,8 @@ export class BattleSystem {
     const savedVictory = state.victory
     this.victory = savedVictory ? { ...savedVictory, portraits: Array.isArray(savedVictory.portraits) ? savedVictory.portraits : [] } : null
     this.finalTen = state.finalTen
-    this.red = { ...state.red }
-    this.blue = { ...state.blue }
+    this.red = adoptTeamPool(state.red)
+    this.blue = adoptTeamPool(state.blue)
     this.elapsedMs = state.elapsedMs
     this.timeLeftMs = state.timeLeftMs
     this.finishingLeft = state.finishingLeft
@@ -250,6 +250,15 @@ function normalizeStatus(status: string): BattleStatus {
   if (status === 'finishing' || status === 'finished' || status === 'victory') return 'victory'
   if (status === 'running' || status === 'paused' || status === 'countdown' || status === 'resetting') return status
   return 'countdown'
+}
+
+/** Keeps the current percent when the pool gets deeper, so a live round picks up the new life. */
+function adoptTeamPool(team: TeamState): TeamState {
+  const nextMax = battleConfig.maxHealth
+  const prevMax = team.maxHealth > 0 ? team.maxHealth : nextMax
+  if (prevMax === nextMax) return { ...team, maxHealth: nextMax }
+  const health = team.health <= 0 ? 0 : Math.min(nextMax, Math.max(1, Math.round(team.health * (nextMax / prevMax))))
+  return { ...team, maxHealth: nextMax, health }
 }
 
 function createTeam(id: TeamId): TeamState {

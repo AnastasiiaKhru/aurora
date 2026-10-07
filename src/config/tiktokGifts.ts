@@ -137,7 +137,7 @@ export const tiktokGifts: TikTokGift[] = [
   gift({ id: 'inferno', name: 'Inferno', coinValue: 2_600, icon: '🔥', image: '/gifts/inferno.webp', attackType: 'firestorm', baseDamage: 28_000, duration: 3_000 }),
   gift({ id: 'sabre', name: 'Star Sabre', coinValue: 3_000, icon: '✦', image: '/gifts/sabre.webp', attackType: 'sword', baseDamage: 32_000, duration: 2_500, soundEffect: 'whoosh' }),
   gift({ id: 'lion', name: 'Lion', coinValue: 29_999, icon: '♛', image: '/gifts/lion.webp', attackType: 'dragon', baseDamage: 62_000, duration: 4_400 }),
-  gift({ id: 'universe', name: 'Universe', coinValue: 34_999, icon: '✹', image: '/gifts/universe.webp', attackType: 'meteor', baseDamage: 78_000, duration: 4_800 }),
+  gift({ id: 'universe', name: 'Universe', coinValue: 34_999, icon: '✹', image: '/gifts/universe.webp', attackType: 'meteor', baseDamage: 120_000, duration: 4_800 }),
   gift({
     id: 'tiktok_universe',
     name: 'TikTok Universe',

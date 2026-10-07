@@ -45,9 +45,11 @@ export function fitCaptureWindow(): void {
   window.resizeTo(width, height)
 }
 
-export const AVATAR_BASE = 82
-export const AVATAR_MAX = 125
-export const AVATAR_LEADER = 155
+export const FOREGROUND_SCALE = 1.15
+
+export const AVATAR_BASE = Math.round(82 * FOREGROUND_SCALE)
+export const AVATAR_MAX = Math.round(125 * FOREGROUND_SCALE)
+export const AVATAR_LEADER = Math.round(155 * FOREGROUND_SCALE)
 
 const ATTACK_CAP = {
   micro: 80,
@@ -86,7 +88,7 @@ export function clampedAttackScale(poseScale: number, power: number, peak: numbe
 export function attackDrawUnit(style: AttackStyle, stageHeight: number): number {
   const tier = styles[style].tier
   const designed = Math.max(1, stageHeight / 760)
-  return Math.min(designed, ATTACK_CAP[tier] / ATTACK_EXTENT[tier])
+  return Math.min(designed, ATTACK_CAP[tier] / ATTACK_EXTENT[tier]) * FOREGROUND_SCALE
 }
 
 let captureWindow: Window | null = null

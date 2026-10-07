@@ -70,7 +70,6 @@ export class BattlefieldApp {
     if (!app || !effects || !players || !attacks) return
     if (director.epoch !== this.seenEpoch) {
       this.seenEpoch = director.epoch
-      players.reset()
       attacks.reset()
       effects.reset()
     }

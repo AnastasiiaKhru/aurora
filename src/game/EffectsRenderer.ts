@@ -22,17 +22,17 @@ interface Floater {
 
 const damageInk = { color: 0x14060c, width: 5, join: 'round' as const }
 const damageStyles = {
-  small: new TextStyle({ fontFamily: 'Oswald, Outfit, sans-serif', fontSize: 28, fill: 0xf4f7fb, fontWeight: '600', stroke: damageInk }),
-  mid: new TextStyle({ fontFamily: 'Oswald, Outfit, sans-serif', fontSize: 42, fill: 0xffe8ec, fontWeight: '600', stroke: damageInk }),
-  large: new TextStyle({ fontFamily: 'Oswald, Outfit, sans-serif', fontSize: 64, fill: 0xfff6ea, fontWeight: '700', stroke: damageInk }),
-  huge: new TextStyle({ fontFamily: 'Oswald, Outfit, sans-serif', fontSize: 92, fill: 0xffffff, fontWeight: '700', stroke: damageInk }),
+  small: new TextStyle({ fontFamily: 'Oswald, Outfit, sans-serif', fontSize: 32, fill: 0xf4f7fb, fontWeight: '600', stroke: damageInk }),
+  mid: new TextStyle({ fontFamily: 'Oswald, Outfit, sans-serif', fontSize: 48, fill: 0xffe8ec, fontWeight: '600', stroke: damageInk }),
+  large: new TextStyle({ fontFamily: 'Oswald, Outfit, sans-serif', fontSize: 74, fill: 0xfff6ea, fontWeight: '700', stroke: damageInk }),
+  huge: new TextStyle({ fontFamily: 'Oswald, Outfit, sans-serif', fontSize: 106, fill: 0xffffff, fontWeight: '700', stroke: damageInk }),
 }
 
 /** Point chips sit on the avatars: same Oswald numbers as the score, team color as the stroke. */
 const hitStyles = {
   red: new TextStyle({
     fontFamily: 'Oswald, Outfit, sans-serif',
-    fontSize: 40,
+    fontSize: 46,
     fill: 0xfff8f2,
     fontWeight: '700',
     letterSpacing: 0.4,
@@ -41,7 +41,7 @@ const hitStyles = {
   }),
   blue: new TextStyle({
     fontFamily: 'Oswald, Outfit, sans-serif',
-    fontSize: 40,
+    fontSize: 46,
     fill: 0xfff8f2,
     fontWeight: '700',
     letterSpacing: 0.4,
@@ -51,8 +51,8 @@ const hitStyles = {
 }
 
 const tagStyles = {
-  red: new TextStyle({ fontFamily: 'Outfit, sans-serif', fontSize: 22, fill: 0xffffff, fontWeight: '800', stroke: { color: 0x9b1230, width: 5, join: 'round' } }),
-  blue: new TextStyle({ fontFamily: 'Outfit, sans-serif', fontSize: 22, fill: 0xffffff, fontWeight: '800', stroke: { color: 0x143a9a, width: 5, join: 'round' } }),
+  red: new TextStyle({ fontFamily: 'Outfit, sans-serif', fontSize: 25, fill: 0xffffff, fontWeight: '800', stroke: { color: 0x9b1230, width: 6, join: 'round' } }),
+  blue: new TextStyle({ fontFamily: 'Outfit, sans-serif', fontSize: 25, fill: 0xffffff, fontWeight: '800', stroke: { color: 0x143a9a, width: 6, join: 'round' } }),
 }
 
 function glowTexture(core: string, mid: string): Texture {
@@ -271,8 +271,8 @@ export class EffectsRenderer {
     const power = this.trauma * this.trauma
     this.trauma = Math.max(0, this.trauma - dt * 1.65)
     return {
-      x: Math.sin(this.time * 46) * power * 16,
-      y: Math.cos(this.time * 55) * power * 11,
+      x: Math.sin(this.time * 46) * power * 34,
+      y: Math.cos(this.time * 55) * power * 24,
     }
   }
 
@@ -460,7 +460,7 @@ export class EffectsRenderer {
       const peak = floater.peak
       const pop = t < 0.16 ? 0.45 + (t / 0.16) * (peak - 0.45) : peak - Math.min(peak - 1, (t - 0.16) * 0.4)
       floater.node.position.set(floater.x, floater.y)
-      floater.node.scale.set(Math.max(0.7, pop))
+      floater.node.scale.set(Math.max(0.8, pop * 1.15))
       floater.node.alpha = t < 0.12 ? t / 0.12 : t > 0.68 ? Math.max(0, 1 - (t - 0.68) / 0.32) : 1
       if (t >= 1) {
         this.release(floater)

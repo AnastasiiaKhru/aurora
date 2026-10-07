@@ -1,4 +1,4 @@
-import { AVATAR_BASE, DESIGN_HEIGHT, DESIGN_WIDTH } from '../broadcast/stage.ts'
+import { AVATAR_BASE, DESIGN_HEIGHT, DESIGN_WIDTH, FOREGROUND_SCALE } from '../broadcast/stage.ts'
 import { battleConfig } from '../config/battleConfig.ts'
 import { ensureMotionFields, stepPlayerMotion, teamBox, type MotionMood, type PlayerMotionState } from './playerMotion.ts'
 import type { LeaderboardEntry, Player } from '../types/Player.ts'
@@ -396,6 +396,7 @@ export class PlayerSystem {
       this.fillVitals(body)
       body.hp = body.maxHp
       body.dying = 0
+      body.shown = 1
       body.hurt = 0
       body.attack = 0
       body.grow = 0
@@ -411,6 +412,8 @@ export class PlayerSystem {
       body.poseMode = 0
       body.poseClock = 0
       body.poseScale = 1
+      body.poseSquash = 1
+      body.poseSquashVel = 0
       body.posePeak = 1
       body.poseRecoil = 0
       body.vx = 0
@@ -551,6 +554,23 @@ export class PlayerSystem {
     body.ultTrail = 0.25
     body.ultJitter = 0
     body.ultLeft = 0.42
+  }
+
+  /** Pulls an entire side toward one point. Used by the Universe hole. */
+  swallow(team: TeamId, x: number, y: number, power: number): void {
+    for (const body of this.bodies.values()) {
+      if (body.team !== team || body.dying > 0 || body.hp <= 0) continue
+      const dx = x - body.x
+      const dy = y - body.y
+      const dist = Math.hypot(dx, dy)
+      if (dist < 0.02) continue
+      const gain = power * (0.5 + Math.min(1.3, dist * 2.8))
+      body.vx += (dx / dist) * gain * 170
+      body.vy += (dy / dist) * gain * 96
+      body.flinch = Math.max(body.flinch, Math.min(1, gain * 2))
+      body.flinchX = dx / dist
+      body.flinchY = dy / dist
+    }
   }
 
   attract(team: TeamId, x: number, y: number, power: number, toward: boolean): void {
@@ -798,8 +818,13 @@ export class PlayerSystem {
   }
 
   private fillVitals(body: PlayerBody): void {
-    if (!(body.maxHp > 0)) body.maxHp = battleConfig.playerHealth
+    const nextMax = battleConfig.playerHealth
+    if (!(body.maxHp > 0)) body.maxHp = nextMax
     if (typeof body.hp !== 'number' || Number.isNaN(body.hp)) body.hp = body.maxHp
+    if (body.maxHp !== nextMax) {
+      body.hp = body.hp <= 0 ? 0 : Math.min(nextMax, Math.max(1, Math.round(body.hp * (nextMax / body.maxHp))))
+      body.maxHp = nextMax
+    }
     body.hp = Math.max(0, Math.min(body.maxHp, body.hp))
     if (typeof body.grow !== 'number') body.grow = 0
     if (typeof body.growHold !== 'number') body.growHold = 0
@@ -1011,7 +1036,7 @@ export function avatarRadius(count: number, viewWidth: number, viewHeight: numbe
   const fitted = viewHeight > 0 ? viewHeight / DESIGN_HEIGHT : 1
   const { cols, rows } = gridShape(Math.max(1, count))
   const cell = Math.min((viewWidth * 0.34) / cols, (viewHeight * 0.28) / rows)
-  return Math.min(AVATAR_BASE / 2, cell * 0.46) * fitted
+  return Math.min(AVATAR_BASE / 2, cell * 0.46 * FOREGROUND_SCALE) * fitted
 }
 
 export function freshRoster(system: PlayerSystem): void {

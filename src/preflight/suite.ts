@@ -22,7 +22,7 @@ import { playY } from '../game/attacks/motion.ts'
 import { BattleSystem } from '../systems/BattleSystem.ts'
 import { DamageSystem } from '../systems/DamageSystem.ts'
 import { PlayerSystem } from '../systems/PlayerSystem.ts'
-import { teamBox } from '../systems/playerMotion.ts'
+import { ROAM_BOTTOM, teamBox } from '../systems/playerMotion.ts'
 import { chatAction, teamCommand } from '../utils/team.ts'
 import { safeAvatarUrl } from '../utils/avatar.ts'
 import {
@@ -77,12 +77,16 @@ export function checkJoin(): LogicResult {
     [' C ', 'red'],
     ['Canada', 'red'],
     ['CANADA', 'red'],
+    ['ca', 'red'],
+    ['CA!', 'red'],
+    ['canadian', 'red'],
     ['U', 'blue'],
     ['u', 'blue'],
     [' U ', 'blue'],
     ['usa', 'blue'],
     ['USA', 'blue'],
-    ['USA!!!', null],
+    ['USA!!!', 'blue'],
+    ['america', 'blue'],
     ['cute', null],
     ['cool', null],
     ['go canada', null],
@@ -218,7 +222,7 @@ export function checkZones(): LogicResult {
   const canada = teamBox('red', false)
   const usa = teamBox('blue', false)
   if (canada.x1 >= usa.x0) errors.push('team lanes overlap')
-  if (canada.y0 < MIN_PLAYER_Y || usa.y1 > MAX_PLAYER_Y) errors.push('wander box leaves the player band')
+  if (canada.y0 < TOP_SAFE_ZONE || usa.y1 > ROAM_BOTTOM) errors.push('wander box enters the chat or the top band')
   for (const [width, height] of LAYOUT_SIZES) {
     const scale = broadcastScale(width, height)
     const stageW = DESIGN_WIDTH * scale
@@ -272,7 +276,8 @@ export function checkMovement(): string[] {
       if (body.shown === 0) continue
       const x = body.x * DESIGN_WIDTH
       const y = body.y * DESIGN_HEIGHT
-      if (y < MIN_PLAYER_Y - 1 || y > MAX_PLAYER_Y + 1) errors.push(`${count} players left the vertical band`)
+      const box = teamBox(body.team, false, Math.max(12, body.motionR || 12))
+      if (y < box.y0 - 1.5 || y > box.y1 + 1.5 || y > ROAM_BOTTOM) errors.push(`${count} players left the play area`)
       if (body.team === 'red') {
         red += 1
         if (x > DESIGN_WIDTH / 2) errors.push('Canada crossed into USA')

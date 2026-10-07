@@ -89,15 +89,18 @@ test('typed C or U moves an existing player instead of duplicating them', () => 
 
 test('only a whole C, Canada, U, or USA comment picks a team', () => {
   for (const text of ['C', 'c', ' C ', 'Canada', 'CANADA', '\u00a0c\u200b']) assert.equal(serverTeamCommand(text), 'red', JSON.stringify(text))
-  for (const text of ['U', 'u', ' U ', 'usa', 'USA']) assert.equal(serverTeamCommand(text), 'blue', JSON.stringify(text))
-  for (const text of ['cute', 'cool', 'USA!!!', 'c u later', 'you', 'go canada']) {
+  for (const text of ['ca', 'CA!', 'canadian', '🇨🇦']) assert.equal(serverTeamCommand(text), 'red', JSON.stringify(text))
+  for (const text of ['U', 'u', ' U ', 'usa', 'USA', 'USA!!!', 'us', 'america', '🇺🇸']) assert.equal(serverTeamCommand(text), 'blue', JSON.stringify(text))
+  for (const text of ['cute', 'cool', 'c u later', 'you', 'go canada']) {
     assert.equal(serverTeamCommand(text), null, JSON.stringify(text))
     assert.equal(chatAction(text).type, 'comment', JSON.stringify(text))
   }
   assert.equal(commentOf({ comment: ' C ' }), 'C')
   assert.equal(commentOf({ content: 'usa' }), 'usa')
   assert.deepEqual(chatAction('canada'), { type: 'join', team: 'red' })
+  assert.deepEqual(chatAction('ca'), { type: 'join', team: 'red' })
   assert.deepEqual(chatAction('USA'), { type: 'join', team: 'blue' })
+  assert.deepEqual(chatAction('america'), { type: 'join', team: 'blue' })
 })
 
 test('an explicit team join keeps the switch flag', () => {

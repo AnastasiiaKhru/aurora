@@ -1,5 +1,5 @@
 import { Graphics, Text, TextStyle } from 'pixi.js'
-import { DESIGN_WIDTH, DESIGN_HEIGHT, MAX_ATTACK_Y, MAX_IMPACT_Y, MAX_PLAYER_Y, attackDrawUnit, stageY } from '../broadcast/stage.ts'
+import { DESIGN_WIDTH, DESIGN_HEIGHT, MAX_ATTACK_Y, MAX_IMPACT_Y, MAX_PLAYER_Y, FOREGROUND_SCALE, attackDrawUnit, stageY } from '../broadcast/stage.ts'
 import { director } from '../systems/GameDirector.ts'
 import type { PlayerBody } from '../systems/PlayerSystem.ts'
 import type { AttackCommand } from '../types/Battle.ts'
@@ -10,6 +10,7 @@ import { attackLab } from './attacks/lab.ts'
 import { drawNpcAttack } from './attacks/npc.ts'
 import { muzzle, playY, sideX, type Pt } from './attacks/motion.ts'
 import { blasterKind, blasterPaint, drawBlaster, flightRate, visualPunch } from './attacks/blaster.ts'
+import { isCatalogGift } from './attacks/liveLook.ts'
 import { cinemaOf, cinemaPlayerPhase, type CinemaSpec } from './attacks/cinema.ts'
 import { paintMote, vortexPoint, type Fx, type Mote } from './attacks/play.ts'
 import { growthFor, styleOf, type AttackStyle } from './attacks/style.ts'
@@ -130,7 +131,7 @@ export class AttackRenderer {
     glow.clear()
     this.lights.begin()
     director.cinemaLive = false
-    this.unit = Math.max(1, height / 760)
+    this.unit = Math.max(1, height / 760) * FOREGROUND_SCALE
     this.viewW = width
     this.viewH = height
     const floor = stageY(MAX_ATTACK_Y, height)
@@ -153,9 +154,9 @@ export class AttackRenderer {
       const t = cmd.duration <= 0 ? 1 : shot.age / cmd.duration
       const scene = cmd.npcKind || cmd.ambient ? null : cinemaOf(cmd)
       const power = Math.max(1, cmd.power ?? 1)
-      const unit = scene
-        ? Math.max(attackDrawUnit(shot.style, height), width / 170) * Math.sqrt(power)
-        : attackDrawUnit(shot.style, height) * power
+      const unit = (scene
+        ? Math.max(attackDrawUnit(shot.style, height), (width / 170) * FOREGROUND_SCALE) * Math.sqrt(power)
+        : attackDrawUnit(shot.style, height) * power)
       if (scene) director.cinemaLive = true
       if (shot.age < local * 1.5 || (scene && !shot.grew)) this.wind(shot, scene)
       const body = cmd.npcKind ? undefined : sender(cmd)
@@ -189,6 +190,8 @@ export class AttackRenderer {
           age: shot.age,
           seed: shot.seed,
           command: cmd,
+          width,
+          height,
           scale: (width / DESIGN_WIDTH) * visualPunch(cmd),
           quiet: crowd > 18,
           sparked: shot.sparked,
@@ -421,6 +424,12 @@ export class AttackRenderer {
 
   private cinemaForce(shot: Shot, spec: CinemaSpec, t: number, cmd: AttackCommand, ends: { from: Pt; to: Pt }, width: number, height: number): void {
     const enemy: TeamId = cmd.team === 'red' ? 'blue' : 'red'
+    if ((cmd.giftName ?? '').trim().toLowerCase() === 'universe') {
+      const hit = spec.impacts[0] ?? 0.66
+      const open = Math.min(1, t / Math.max(0.2, hit))
+      director.players.swallow(enemy, enemy === 'blue' ? 0.75 : 0.25, 0.41, 0.07 + open * 0.16)
+      return
+    }
     const nx = ends.to.x / width
     const ny = ends.to.y / height
     const hit = spec.impacts[spec.impacts.length - 1] ?? 0.75
@@ -510,7 +519,7 @@ export class AttackRenderer {
         const spread = (hit - (cmd.impacts.length - 1) / 2) * 16 * attackDrawUnit(shot.style, height)
         const point = { x: ends.to.x, y: Math.min(stageY(MAX_IMPACT_Y, height), ends.to.y + spread) }
         const dealt = director.onImpact(cmd, point.x / width, point.y / height, hit)
-        if (hit === 0) this.impactBurst(cmd, point)
+        if (hit === 0 && !isCatalogGift(cmd.giftName)) this.impactBurst(cmd, point)
         if (!cmd.ambient || shot.style !== 'pulse') this.react(shot.style, cmd.team, cmd.targetId, point, width, height)
         const spots = cmd.npcKind ? [] : hitPoints(cmd, shot.hitIds, width, height)
         if (hit === 0) this.landSplash(shot)
@@ -520,9 +529,13 @@ export class AttackRenderer {
         if (!cmd.ambient && (cmd.rarity === 'legendary' || cmd.rarity === 'large') && hit === 0) {
           director.hitStop = Math.max(director.hitStop, cmd.rarity === 'legendary' ? 0.07 : 0.045)
         }
-        if (hit === 0 && cmd.shake !== 'none' && shot.style !== 'pulse') {
-          const level = cmd.shake === 'legendary' ? 'large' : cmd.shake
-          if (attackLab.shake > 0.05) this.effects.addShake(level)
+        if (hit === 0 && attackLab.shake > 0.05) {
+          if (isCatalogGift(cmd.giftName)) {
+            const level = cmd.rarity === 'legendary' ? 'legendary' : cmd.rarity === 'large' ? 'large' : cmd.rarity === 'medium' ? 'medium' : 'small'
+            this.effects.addShake(level)
+          } else if (cmd.shake !== 'none' && shot.style !== 'pulse') {
+            this.effects.addShake(cmd.shake === 'legendary' ? 'large' : cmd.shake)
+          }
         }
       })
     })

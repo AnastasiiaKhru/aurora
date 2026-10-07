@@ -683,6 +683,7 @@ export class GameDirector {
    * Returns that per-person amount so the battlefield can show it.
    */
   spendHitPoints(command: AttackCommand, people: number): number {
+    if (command.damage <= 0) return 0
     const each = hitPointEach(command, people)
     if (each <= 0 || people <= 0 || command.npcKind) return 0
     if (!this.leading) return each
@@ -696,7 +697,7 @@ export class GameDirector {
 
   /** Knocks every extra opponent a shot connects with. Team health still drops once in onImpact. */
   splashStrike(command: AttackCommand, ids: readonly string[]): void {
-    if (command.ambient || command.npcKind) return
+    if (command.ambient || command.npcKind || command.damage <= 0) return
     for (const id of ids) {
       if (!id || id === command.targetId) continue
       const marked = this.players.bodies.get(id)

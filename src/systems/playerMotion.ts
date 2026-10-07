@@ -3,7 +3,9 @@ import type { PlayerBody } from './PlayerSystem.ts'
 import type { TeamId } from '../types/Team.ts'
 import { clamp, hashString } from '../utils/math.ts'
 
-const ROAM_SPEED = 2.15
+const ROAM_SPEED = 2.65
+/** Lowest point an avatar circle may reach. Below this stays clear for TikTok chat. */
+export const ROAM_BOTTOM = 1540
 const EDGE_PAD = 16
 const CENTER_GAP = 28
 const CELL = 180
@@ -78,7 +80,9 @@ export function syncPlayfield(): void {
   let bottom = 0
   for (const selector of ['.scoreboard', '.join-instruction', '.power-menu']) {
     const node = stage.querySelector(selector)
-    if (!node) continue
+    if (!(node instanceof HTMLElement)) continue
+    const style = getComputedStyle(node)
+    if (style.display === 'none' || style.visibility === 'hidden') continue
     const rect = node.getBoundingClientRect()
     const y = ((rect.bottom - stageRect.top) / stageRect.height) * DESIGN_HEIGHT
     if (Number.isFinite(y)) bottom = Math.max(bottom, y)
@@ -90,10 +94,10 @@ export function teamBox(team: TeamId, _attacking = false, radius = AVATAR_BASE /
   const mid = DESIGN_WIDTH / 2
   const room = mid - CENTER_GAP - EDGE_PAD
   const r = Math.max(12, Math.min(radius, Math.max(12, room / 2 - 8)))
-  const boundaryTop = Math.max(GAMEPLAY_START + 12, playfield.safeTop)
-  const boundaryBottom = Math.min(GAMEPLAY_END - 20, MAX_PLAYER_Y + r)
+  const boundaryTop = Math.max(GAMEPLAY_START + 8, playfield.safeTop)
+  const boundaryBottom = ROAM_BOTTOM
   let y0 = boundaryTop + r
-  let y1 = Math.min(MAX_PLAYER_Y, boundaryBottom - r)
+  let y1 = boundaryBottom - r
   if (y1 < y0 + 24) {
     const midY = clamp((MIN_PLAYER_Y + MAX_PLAYER_Y) / 2, MIN_PLAYER_Y + 12, MAX_PLAYER_Y - 12)
     y0 = midY - 12
@@ -139,7 +143,7 @@ export function stepPlayerMotion(entries: MotionEntry[], dt: number, time: numbe
   for (const entry of entries) {
     if (entry.body.shown === 0) hidden[entry.body.team] += 1
   }
-  if (mood.hidden || step <= 0) {
+  if (step <= 0) {
     for (const entry of entries) clampBody(entry.body)
     return hidden
   }
@@ -244,7 +248,7 @@ function steer(entry: MotionEntry, dt: number, time: number, reduced: boolean, l
   let dist = Math.hypot(dx, dy)
   const arrive = Math.max(22, body.motionR * 0.42)
   body.goalWait -= dt
-  if (body.goalSerial === 0 || dist < arrive || body.goalWait <= 0) {
+  if (body.goalSerial === 0 || body.goalWait <= 0 || dist < arrive) {
     const goal = retarget(body, box, mates)
     tx = goal.x
     ty = goal.y
@@ -255,9 +259,10 @@ function steer(entry: MotionEntry, dt: number, time: number, reduced: boolean, l
 
   const nx = dist > 0.001 ? dx / dist : 1
   const ny = dist > 0.001 ? dy / dist : 0
-  const ease = dist < arrive ? 0.62 + 0.38 * (dist / arrive) : 1
-  const omega = 0.8 + (body.persona % 7) * 0.18
-  const sway = Math.sin(time * omega + body.phase) * (11 + (body.curve > 0 ? body.curve : 6) * 1.15)
+  const ease = dist < arrive ? 0.35 + 0.4 * (dist / arrive) : 1
+  const omega = 0.55 + (body.persona % 7) * 0.12
+  const swayScale = dist < arrive ? 0.2 : 1
+  const sway = Math.sin(time * omega + body.phase) * (8 + (body.curve > 0 ? body.curve : 6)) * swayScale
   const spread = spreadFromMates(px, py, body.motionR, mates)
   let desiredVx = nx * cruise * ease - ny * sway + spread.x
   let desiredVy = ny * cruise * ease + nx * sway + spread.y
@@ -405,7 +410,10 @@ function retarget(body: PlayerBody, box: Box, mates: Point[]): { x: number; y: n
   body.aimX = goal.x / DESIGN_WIDTH
   body.aimY = goal.y / DESIGN_HEIGHT
   const seed = hashString(`${body.id}:${body.goalSerial}:leg`)
-  body.goalWait = 0.62 + (seed % 80) / 100
+  const travel = Math.hypot(goal.x - body.x * DESIGN_WIDTH, goal.y - body.y * DESIGN_HEIGHT)
+  const pace = Math.max(56, (body.speed >= 20 ? body.speed : 34) * ROAM_SPEED)
+  const dwell = 0.15 + (seed % 20) / 100
+  body.goalWait = Math.min(6.5, travel / pace + dwell)
   return goal
 }
 
@@ -451,17 +459,8 @@ function spreadFromMates(px: number, py: number, radius: number, mates: Point[])
   return { x: sx, y: sy, r: 0 }
 }
 
-function territory(body: PlayerBody, x0: number, y0: number, spanX: number, spanY: number): Box {
-  const hx = clamp((body.homeX || 0.5) * DESIGN_WIDTH, x0, x0 + spanX)
-  const hy = clamp((body.homeY || 0.5) * DESIGN_HEIGHT, y0, y0 + spanY)
-  const reachX = Math.max(48, spanX * 0.2)
-  const reachY = Math.max(42, spanY * 0.18)
-  return {
-    x0: clamp(hx - reachX, x0, x0 + spanX),
-    x1: clamp(hx + reachX, x0, x0 + spanX),
-    y0: clamp(hy - reachY, y0, y0 + spanY),
-    y1: clamp(hy + reachY, y0, y0 + spanY),
-  }
+function territory(x0: number, y0: number, spanX: number, spanY: number): Box {
+  return { x0, x1: x0 + spanX, y0, y1: y0 + spanY }
 }
 
 function pickGoal(body: PlayerBody, box: Box, mates: Point[]): { x: number; y: number } {
@@ -475,27 +474,34 @@ function pickGoal(body: PlayerBody, box: Box, mates: Point[]): { x: number; y: n
   const y1 = box.y1 - padY
   const spanX = Math.max(1, x1 - x0)
   const spanY = Math.max(1, y1 - y0)
-  const zone = territory(body, x0, y0, spanX, spanY)
+  const zone = territory(x0, y0, spanX, spanY)
   const zoneW = Math.max(1, zone.x1 - zone.x0)
   const zoneH = Math.max(1, zone.y1 - zone.y0)
   const px = body.x * DESIGN_WIDTH
   const py = body.y * DESIGN_HEIGHT
-  const minTravel = Math.min(170, Math.max(64, Math.min(spanX, spanY) * 0.22))
+  const minTravel = Math.max(200, Math.min(spanX, spanY) * 0.62)
   let best = { x: clamp((zone.x0 + zone.x1) / 2, x0, x1), y: clamp((zone.y0 + zone.y1) / 2, y0, y1) }
   let bestScore = -1
-  for (let attempt = 0; attempt < 8; attempt += 1) {
+  let nearestBest = best
+  let nearestScore = -1
+  for (let attempt = 0; attempt < 12; attempt += 1) {
     const x = zone.x0 + Math.random() * zoneW
     const y = zone.y0 + Math.random() * zoneH
     const travel = Math.hypot(x - px, y - py)
     let nearest = Math.min(spanX, spanY)
     for (const mate of mates) nearest = Math.min(nearest, Math.hypot(x - mate.x, y - mate.y))
-    const score = nearest * 1.45 + Math.min(travel, minTravel) * 0.22
+    const score = nearest * 0.85 + Math.min(travel, minTravel * 1.7) * 1.15
+    if (score > nearestScore) {
+      nearestScore = score
+      nearestBest = { x, y }
+    }
+    if (travel < minTravel * 0.55) continue
     if (score > bestScore) {
       bestScore = score
       best = { x, y }
     }
   }
-  return best
+  return bestScore >= 0 ? best : nearestBest
 }
 
 function separate(shown: MotionEntry[]): void {

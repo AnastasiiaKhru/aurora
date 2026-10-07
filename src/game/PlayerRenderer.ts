@@ -4,7 +4,7 @@ import { teamPalette } from '../config/effectConfig.ts'
 import { director } from '../systems/GameDirector.ts'
 import type { TeamId } from '../types/Team.ts'
 import { clamp, easeOutCubic } from '../utils/math.ts'
-import { DESIGN_HEIGHT, DESIGN_WIDTH, clampedAttackScale, permanentAvatarDiameter } from '../broadcast/stage.ts'
+import { DESIGN_HEIGHT, DESIGN_WIDTH, FOREGROUND_SCALE, clampedAttackScale, permanentAvatarDiameter } from '../broadcast/stage.ts'
 import { motionDebug, teamBox } from '../systems/playerMotion.ts'
 import { readReaction, tickReactionsClock } from './vfxReactions.ts'
 
@@ -141,7 +141,7 @@ export class PlayerRenderer {
       const cell = Math.min((width * 0.34) / cols, (height * 0.28) / rows)
       const rank = places.get(body.id) ?? 0
       const selected = director.hud.selected?.id === body.id
-      const diameter = Math.min(permanentAvatarDiameter(body.power || 0, rank === 1), cell * 0.92)
+      const diameter = Math.min(permanentAvatarDiameter(body.power || 0, rank === 1), cell * 0.92 * FOREGROUND_SCALE)
       const radius = diameter / 2
       const signature = `${body.team}:${Math.round(radius)}:${selected ? 1 : 0}:${rank}`
       if (view.signature !== signature) {
@@ -150,9 +150,10 @@ export class PlayerRenderer {
         view.signature = signature
         this.paint(view, radius, body.team, rank)
       }
-      if (view.textureKey !== player.avatarKey) {
+      if (view.textureKey !== player.avatarKey || !faceReady(view.avatar.texture)) {
         view.textureKey = player.avatarKey
         view.avatar.texture = this.textureFor(player.avatarKey, player.avatarUrl)
+        view.avatar.alpha = 1
         this.fit(view)
       }
       const joining = body.spawn < 1
@@ -353,8 +354,6 @@ export class PlayerRenderer {
   reset(): void {
     for (const view of this.views.values()) view.root.destroy({ children: true })
     this.views.clear()
-    for (const texture of this.textures.values()) texture.destroy(true)
-    this.textures.clear()
   }
 
   private create(username: string, team: TeamId): PlayerView {
@@ -433,7 +432,8 @@ export class PlayerRenderer {
 
   private textureFor(key: string, url: string): Texture {
     const cached = this.textures.get(key)
-    if (cached) return cached
+    if (faceReady(cached)) return cached!
+    if (cached) this.textures.delete(key)
     if (url.startsWith('npc:') || !url || this.loading.has(key)) return Texture.EMPTY
     this.loading.add(key)
     const remote = key.startsWith('remote:')
@@ -447,6 +447,7 @@ export class PlayerRenderer {
   private loadImage(key: string, src: string, canFallback: boolean, retry = ''): void {
     const image = new Image()
     image.onload = () => {
+      this.loading.delete(key)
       const texture = this.coverTexture(image)
       texture.source.scaleMode = 'linear'
       texture.source.autoGenerateMipmaps = false
@@ -486,6 +487,12 @@ export class PlayerRenderer {
       this.fit(view)
     }
   }
+}
+
+function faceReady(texture: Texture | null | undefined): boolean {
+  if (!texture || texture === Texture.EMPTY || texture.destroyed) return false
+  const source = texture.source
+  return !!source && !source.destroyed && source.width > 1 && source.height > 1
 }
 
 function sharpCover(image: HTMLImageElement, edge: number): HTMLCanvasElement {
