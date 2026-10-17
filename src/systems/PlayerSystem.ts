@@ -117,10 +117,12 @@ export class PlayerSystem {
   readonly bodies = new Map<string, PlayerBody>()
   reserves: { red: number; blue: number } = { red: 0, blue: 0 }
   private seq = 1
+  private readonly keptPoints = new Map<string, number>()
 
   clear(): void {
     this.players.clear()
     this.bodies.clear()
+    this.keptPoints.clear()
     resetDummyAvatars()
     resetNames()
   }
@@ -170,7 +172,7 @@ export class PlayerSystem {
       initials: input.initials,
       team: input.team,
       giftValue: 0,
-      battlePoints: 0,
+      battlePoints: this.keptPoints.get(input.id) ?? 0,
       damageDealt: 0,
       giftCount: 0,
       largestCombo: 0,
@@ -316,11 +318,16 @@ export class PlayerSystem {
   remove(id: string): void {
     const player = this.players.get(id)
     if (!player) return
+    this.keptPoints.set(id, player.battlePoints)
     releaseDummyAvatar(id)
     releaseName(player.username)
     this.players.delete(id)
     this.bodies.delete(id)
     this.layout(player.team)
+  }
+
+  savedBattlePoints(id: string): number {
+    return this.keptPoints.get(id) ?? 0
   }
 
   setTeam(id: string, team: TeamId): void {
@@ -386,7 +393,6 @@ export class PlayerSystem {
   restoreForRound(): void {
     for (const player of this.players.values()) {
       player.giftValue = 0
-      player.battlePoints = 0
       player.damageDealt = 0
       player.giftCount = 0
       player.largestCombo = 0
@@ -489,6 +495,24 @@ export class PlayerSystem {
     body.grow = 1
     body.growHold = 0.78
     body.nameTime = Math.max(body.nameTime, 1.8)
+  }
+
+  /** Puts a knocked-out player back on the field. Score and team stay as they are. */
+  respawn(id: string): void {
+    const body = this.bodies.get(id)
+    if (!body) return
+    this.fillVitals(body)
+    body.hp = body.maxHp
+    body.dying = 0
+    body.shown = 1
+    body.spawn = 0
+    body.hurt = 0
+    body.flinch = 0
+    body.vx = 0
+    body.vy = 0
+    body.motion = 'wander'
+    body.nameTime = 2.4
+    body.spotlight = Math.max(body.spotlight, SPOTLIGHT_SECONDS)
   }
 
   strike(id: string, amount: number): boolean {

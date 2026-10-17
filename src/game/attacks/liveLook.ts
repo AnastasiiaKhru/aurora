@@ -288,6 +288,16 @@ function tick(ctx: BlasterCtx, step: Step, s: number, color: number): void {
   if (step.k > 0) pop(ctx, ctx.to, step.k, color, 16 * s)
 }
 
+function filament(ctx: BlasterCtx, a: Pt, b: Pt, color: number, glow = 10, core = 1.4): void {
+  line(ctx.glow, a, b, glow, color, 0.55)
+  line(ctx.g, a, b, core, 0xffffff, 1)
+}
+
+function mote(ctx: BlasterCtx, x: number, y: number, color: number, r = 2): void {
+  ctx.glow.circle(x, y, r * 5).fill({ color, alpha: 0.32 })
+  ctx.g.circle(x, y, r).fill({ color: 0xffffff, alpha: 0.95 })
+}
+
 function hearts(ctx: BlasterCtx, step: Step, _s: number, count: number): void {
   const n = perpendicular(ctx.from, ctx.to)
   const color = 0xff4d88
@@ -295,13 +305,12 @@ function hearts(ctx: BlasterCtx, step: Step, _s: number, count: number): void {
   for (let i = 0; i < count; i += 1) {
     const side = (i - (count - 1) / 2) * 40
     const head = { x: step.head.x + n.x * side, y: step.head.y + n.y * side }
-    for (let trail = 3; trail >= 1; trail -= 1) {
-      const back = behind(ctx.from, ctx.to, head, trail * 26)
-      heart(ctx.g, back.x, back.y, size * (0.72 - trail * 0.12), color, 0.28 / trail, step.ang)
+    for (let trail = 4; trail >= 1; trail -= 1) {
+      const back = behind(ctx.from, ctx.to, head, trail * 18)
+      mote(ctx, back.x, back.y, color, 1.4)
     }
-    ctx.glow.circle(head.x, head.y, size * 2.1).fill({ color, alpha: 0.5 })
-    heart(ctx.g, head.x, head.y, size, color, 1, step.ang)
-    heart(ctx.g, head.x, head.y, size * 0.38, 0xfff6ea, 0.9, step.ang)
+    ctx.glow.circle(head.x, head.y, size * 1.6).fill({ color, alpha: 0.28 })
+    heart(ctx.g, head.x, head.y, size * 0.85, color, 0.92, step.ang)
   }
   if (step.u > 0.7) {
     ctx.glow.circle(ctx.to.x, ctx.to.y, RIM + 16).stroke({ width: 14, color, alpha: 0.35 * (1 - step.k) })
@@ -333,12 +342,12 @@ function glitch(ctx: BlasterCtx, step: Step, _s: number): void {
   const split = step.u < 0.62 ? step.u / 0.62 : 1 - (step.u - 0.62) / 0.38
   const kick = split * 42
   const radius = RIM + 14
-  ctx.glow.circle(ctx.to.x - kick, ctx.to.y, radius + 10).stroke({ width: 16, color: 0x22e7ff, alpha: 0.45 })
-  ctx.glow.circle(ctx.to.x + kick, ctx.to.y, radius + 10).stroke({ width: 16, color: 0xff2d8a, alpha: 0.45 })
-  ctx.g.circle(ctx.to.x - kick, ctx.to.y, radius).stroke({ width: 3.5, color: 0x22e7ff, alpha: 1 })
-  ctx.g.circle(ctx.to.x + kick, ctx.to.y, radius).stroke({ width: 3.5, color: 0xff2d8a, alpha: 1 })
-  ctx.g.circle(ctx.to.x - kick, ctx.to.y, radius - 8).stroke({ width: 1.2, color: 0xffffff, alpha: 0.7 })
-  ctx.g.circle(ctx.to.x + kick, ctx.to.y, radius - 8).stroke({ width: 1.2, color: 0xffffff, alpha: 0.7 })
+  ctx.glow.circle(ctx.to.x - kick, ctx.to.y, radius + 8).stroke({ width: 10, color: 0x22e7ff, alpha: 0.28 })
+  ctx.glow.circle(ctx.to.x + kick, ctx.to.y, radius + 8).stroke({ width: 10, color: 0xff2d8a, alpha: 0.28 })
+  ctx.g.circle(ctx.to.x - kick, ctx.to.y, radius).stroke({ width: 1.6, color: 0x22e7ff, alpha: 0.95 })
+  ctx.g.circle(ctx.to.x + kick, ctx.to.y, radius).stroke({ width: 1.6, color: 0xff2d8a, alpha: 0.95 })
+  ctx.g.circle(ctx.to.x - kick, ctx.to.y, radius - 10).stroke({ width: 1, color: 0xffffff, alpha: 0.45 })
+  ctx.g.circle(ctx.to.x + kick, ctx.to.y, radius - 10).stroke({ width: 1, color: 0xffffff, alpha: 0.45 })
   for (let i = 0; i < 4; i += 1) {
     const y = ctx.to.y - radius - 14 + i * 7
     const slide = Math.sin(ctx.age * 9 + i) * 18
@@ -350,9 +359,9 @@ function glitch(ctx: BlasterCtx, step: Step, _s: number): void {
 
 function squareStop(ctx: BlasterCtx, step: Step, _s: number): void {
   const grow = RIM + 8 + step.u * 56
-  ctx.glow.rect(ctx.to.x - grow - 12, ctx.to.y - grow - 12, grow * 2 + 24, grow * 2 + 24).stroke({ width: 18, color: 0xb8fff2, alpha: 0.32 })
-  ctx.g.rect(ctx.to.x - grow, ctx.to.y - grow, grow * 2, grow * 2).stroke({ width: 3.2, color: 0xffffff, alpha: 1 })
-  ctx.g.rect(ctx.to.x - grow + 10, ctx.to.y - grow + 10, grow * 2 - 20, grow * 2 - 20).stroke({ width: 1.4, color: 0xb8fff2, alpha: 0.85 })
+  ctx.glow.rect(ctx.to.x - grow - 8, ctx.to.y - grow - 8, grow * 2 + 16, grow * 2 + 16).stroke({ width: 10, color: 0xb8fff2, alpha: 0.22 })
+  ctx.g.rect(ctx.to.x - grow, ctx.to.y - grow, grow * 2, grow * 2).stroke({ width: 1.5, color: 0xffffff, alpha: 0.92 })
+  ctx.g.rect(ctx.to.x - grow + 12, ctx.to.y - grow + 12, grow * 2 - 24, grow * 2 - 24).stroke({ width: 1, color: 0xb8fff2, alpha: 0.55 })
   const arm = 22 + step.u * 10
   const corners = [
     [-1, -1],
@@ -363,8 +372,8 @@ function squareStop(ctx: BlasterCtx, step: Step, _s: number): void {
   for (const [sx, sy] of corners) {
     const x = ctx.to.x + sx * grow
     const y = ctx.to.y + sy * grow
-    line(ctx.g, { x, y }, { x: x - sx * arm, y }, 3, 0xffffff, 1)
-    line(ctx.g, { x, y }, { x, y: y - sy * arm }, 3, 0xb8fff2, 1)
+    filament(ctx, { x, y }, { x: x - sx * arm, y }, 0xffffff, 6, 1.2)
+    filament(ctx, { x, y }, { x, y: y - sy * arm }, 0xb8fff2, 6, 1.2)
   }
 }
 
@@ -374,26 +383,23 @@ function slash(ctx: BlasterCtx, step: Step, s: number, color: number): void {
   const reach = 34 * Math.min(s, 1.4)
   const a = { x: aim.x - n.x * reach, y: aim.y - n.y * reach }
   const b = { x: aim.x + n.x * reach * step.u, y: aim.y + n.y * reach * step.u }
-  line(ctx.glow, a, b, 14, color, 0.4)
-  line(ctx.g, a, b, 3.2, 0xffffff, 1)
-  ctx.g.circle(b.x, b.y, 6).fill({ color: 0xf4fbff, alpha: 1 })
-  ctx.glow.circle(b.x, b.y, 16).fill({ color, alpha: 0.45 })
-  for (let i = 0; i < 5; i += 1) {
-    const along = lerp(a, b, 0.2 + i * 0.16)
-    const lift = (i % 2 === 0 ? 1 : -1) * (10 + i * 3)
-    const chip = { x: along.x + n.x * lift, y: along.y + n.y * lift }
-    ctx.g.poly([chip.x, chip.y - 7, chip.x + 5, chip.y + 4, chip.x - 5, chip.y + 3]).fill({ color: 0xe8fbff, alpha: 0.9 })
+  filament(ctx, a, b, color, 12, 1.5)
+  mote(ctx, b.x, b.y, color, 2.4)
+  for (let i = 0; i < 6; i += 1) {
+    const along = lerp(a, b, 0.15 + i * 0.14)
+    const lift = (i % 2 === 0 ? 1 : -1) * (8 + i * 2)
+    mote(ctx, along.x + n.x * lift, along.y + n.y * lift, color, 1.3)
   }
-  ctx.glow.circle(ctx.to.x, ctx.to.y, RIM + 14).stroke({ width: 12, color, alpha: 0.35 * (1 - step.k) })
-  ctx.g.circle(ctx.to.x, ctx.to.y, RIM + 8).stroke({ width: 1.8, color, alpha: 0.8 * (1 - step.k) })
+  ctx.glow.circle(ctx.to.x, ctx.to.y, RIM + 12).stroke({ width: 8, color, alpha: 0.22 * (1 - step.k) })
+  ctx.g.circle(ctx.to.x, ctx.to.y, RIM + 8).stroke({ width: 1.2, color: 0xf4fbff, alpha: 0.7 * (1 - step.k) })
 }
 
 function mist(ctx: BlasterCtx, step: Step, _s: number): void {
   const aim = edge(ctx.from, ctx.to)
   const p = lerp(ctx.from, aim, step.u)
-  ctx.glow.ellipse(p.x, p.y, 110, 58).fill({ color: 0xd7a6ff, alpha: 0.4 })
-  ctx.g.ellipse(p.x, p.y, 64, 32).fill({ color: 0xefd4ff, alpha: 0.28 })
-  ctx.g.ellipse(p.x - 18, p.y - 8, 28, 16).fill({ color: 0xfff6ea, alpha: 0.35 })
+  ctx.glow.ellipse(p.x, p.y, 120, 64).fill({ color: 0xd7a6ff, alpha: 0.22 })
+  ctx.g.ellipse(p.x, p.y, 70, 34).stroke({ width: 1.2, color: 0xf6e4ff, alpha: 0.55 })
+  ctx.glow.ellipse(p.x, p.y, 40, 18).fill({ color: 0xfff6ea, alpha: 0.16 })
   for (let i = 0; i < 8; i += 1) {
     const a = ctx.age * 1.4 + i
     const r = 24 + (i % 4) * 14
@@ -407,10 +413,10 @@ function ringPass(ctx: BlasterCtx, step: Step, _s: number): void {
   const travel = Math.min(1, step.u / 0.7)
   const p = lerp(ctx.from, ctx.to, travel)
   const radius = 86 - travel * (86 - (RIM + 16))
-  ctx.glow.circle(p.x, p.y, radius).stroke({ width: 26, color: 0xff8fb8, alpha: 0.42 })
-  ctx.g.circle(p.x, p.y, radius).stroke({ width: 16, color: 0xff8fb8, alpha: 1 })
-  ctx.g.circle(p.x, p.y, radius).stroke({ width: 3.2, color: 0xfff6ea, alpha: 0.95 })
-  ctx.g.arc(p.x, p.y, radius, -2.4, -0.4).stroke({ width: 5, color: 0xfff6ea, alpha: 0.85 })
+  ctx.glow.circle(p.x, p.y, radius).stroke({ width: 14, color: 0xff8fb8, alpha: 0.28 })
+  ctx.g.circle(p.x, p.y, radius).stroke({ width: 5, color: 0xff8fb8, alpha: 0.72 })
+  ctx.g.circle(p.x, p.y, radius).stroke({ width: 1.4, color: 0xfff6ea, alpha: 0.9 })
+  ctx.g.arc(p.x, p.y, radius, -2.2, -0.5).stroke({ width: 2, color: 0xffffff, alpha: 0.8 })
   for (let i = 0; i < 10; i += 1) {
     const a = ctx.age * 2 + (i / 10) * Math.PI * 2
     const sprinkle = [0xff5b8a, 0xffd15c, 0x7ee7ff, 0xffffff][i % 4] ?? 0xffffff
@@ -424,20 +430,19 @@ function bars(ctx: BlasterCtx, step: Step, _s: number): void {
   const span = Math.max(40, box.bottom - box.top)
   for (let i = 0; i < colors.length; i += 1) {
     const band = span / colors.length
-    const y = box.top + i * band
+    const y = box.top + band * (i + 0.5)
     const wide = (box.x1 - box.x0) * clamp(step.u * 1.25 - i * 0.06, 0, 1)
-    ctx.glow.rect(box.x0, y + band * 0.34, wide, Math.max(8, band * 0.28)).fill({ color: colors[i]!, alpha: 0.35 })
-    ctx.g.rect(box.x0, y + band * 0.4, wide, Math.max(4, band * 0.12)).fill({ color: colors[i]!, alpha: 0.9 * (1 - step.k * 0.4) })
+    ctx.glow.rect(box.x0, y - 6, wide, 12).fill({ color: colors[i]!, alpha: 0.16 })
+    ctx.g.rect(box.x0, y - 1, wide, 2).fill({ color: colors[i]!, alpha: 0.85 * (1 - step.k * 0.35) })
   }
-  for (let i = 0; i < 26; i += 1) {
+  for (let i = 0; i < 22; i += 1) {
     const color = colors[i % colors.length]!
     const col = (i * 5 + 2) % 8
     const x = box.x0 + ((col + 0.5) / 8) * (box.x1 - box.x0)
     const fall = (step.u * 1.15 + i * 0.06) % 1
     const y = box.top + fall * span
-    const s = 5 + (i % 3) * 3
-    ctx.glow.circle(x, y, s * 1.6).fill({ color, alpha: 0.35 })
-    ctx.g.poly([x, y - s, x + s * 0.55, y, x, y + s, x - s * 0.55, y]).fill({ color, alpha: 0.95 })
+    mote(ctx, x, y, color, 1.5)
+    filament(ctx, { x, y: y - 10 }, { x, y: y + 8 }, color, 5, 1)
   }
 }
 
@@ -446,32 +451,25 @@ function column(ctx: BlasterCtx, step: Step, _s: number): void {
   const lip = ctx.to.y - RIM
   const y = box.top + (lip - box.top) * step.u
   const h = Math.max(8, lip - y)
-  const w = 70
-  ctx.glow.rect(ctx.to.x - w * 0.95, y, w * 1.9, h).fill({ color: 0xffd0ea, alpha: 0.28 })
-  ctx.g.rect(ctx.to.x - w * 0.5, y, w, h).fill({ color: 0xff8ec8, alpha: 0.35 })
-  ctx.g.rect(ctx.to.x - w * 0.22, y, w * 0.44, h).fill({ color: 0xfff6ea, alpha: 0.72 })
-  ctx.g.rect(ctx.to.x - 4, y, 8, h).fill({ color: 0xffffff, alpha: 1 })
-  ctx.glow.circle(ctx.to.x, lip, 28).fill({ color: 0xffd0ea, alpha: 0.45 * step.u })
+  ctx.glow.rect(ctx.to.x - 36, y, 72, h).fill({ color: 0xffd0ea, alpha: 0.16 })
+  filament(ctx, { x: ctx.to.x, y }, { x: ctx.to.x, y: lip }, 0xff8ec8, 22, 1.6)
+  filament(ctx, { x: ctx.to.x - 16, y: y + h * 0.15 }, { x: ctx.to.x - 8, y: lip }, 0xfff6ea, 8, 1)
+  filament(ctx, { x: ctx.to.x + 16, y: y + h * 0.15 }, { x: ctx.to.x + 8, y: lip }, 0xfff6ea, 8, 1)
+  mote(ctx, ctx.to.x, lip, 0xffd0ea, 3)
   for (let i = 0; i < 8; i += 1) {
     const t = (step.u * 1.4 + i * 0.12) % 1
-    const py = lip - t * h
-    const px = ctx.to.x + Math.sin(i * 2.1 + ctx.age * 4) * 22
-    ctx.g.circle(px, py, 3).fill({ color: 0xffffff, alpha: 0.9 })
+    mote(ctx, ctx.to.x + Math.sin(i * 2.1 + ctx.age * 4) * 18, lip - t * h, 0xffd0ea, 1.4)
   }
 }
 
 function flare(ctx: BlasterCtx, step: Step, _s: number): void {
   const box = sideBox(ctx)
   const y = box.top + (Math.max(box.top + 20, ctx.to.y) - box.top) * step.u
-  ctx.glow.rect(box.x0, y - 22, box.x1 - box.x0, 44).fill({ color: 0xffe7a8, alpha: 0.34 })
-  ctx.g.rect(box.x0, y - 3, box.x1 - box.x0, 6).fill({ color: 0xf0c56a, alpha: 1 })
-  ctx.g.rect(box.x0, y - 1, box.x1 - box.x0, 2).fill({ color: 0xffffff, alpha: 0.95 })
+  ctx.glow.rect(box.x0, y - 10, box.x1 - box.x0, 20).fill({ color: 0xffe7a8, alpha: 0.18 })
+  filament(ctx, { x: box.x0, y }, { x: box.x1, y }, 0xf0c56a, 8, 1.3)
   for (let i = 0; i < 5; i += 1) {
     const x = box.x0 + ((i + 0.5) / 5) * (box.x1 - box.x0)
-    const arm = 10 + (i % 2) * 6
-    line(ctx.g, { x: x - arm, y }, { x: x + arm, y }, 1.6, 0xfff6ea, 0.9)
-    line(ctx.g, { x, y: y - arm }, { x, y: y + arm }, 1.6, 0xfff6ea, 0.9)
-    ctx.g.circle(x, y, 3).fill({ color: 0xffffff, alpha: 1 })
+    mote(ctx, x, y, 0xfff6ea, 1.6)
   }
 }
 
@@ -483,12 +481,10 @@ function skyBolt(ctx: BlasterCtx, step: Step, _s: number, count: number): void {
     if (local <= 0) continue
     const span = box.x1 - box.x0
     const x = box.x0 + span * ((i + 1) / (count + 1))
-    ctx.glow.rect(x - 10, box.top, 20, Math.max(8, (ctx.to.y - RIM - box.top) * local)).fill({ color: 0xfff4c4, alpha: 0.22 })
-    jag(ctx.g, x, box.top, ctx.to.y - RIM, local, 3.4, 0xfff6d0, i + 1)
-    jag(ctx.glow, x, box.top, ctx.to.y - RIM, local, 14, 0xffe7a0, i + 3)
     const endY = box.top + (ctx.to.y - RIM - box.top) * local
-    ctx.glow.circle(x, endY, 18).fill({ color: 0xfff4c4, alpha: 0.45 })
-    ctx.g.circle(x, endY, 4).fill({ color: 0xffffff, alpha: 1 })
+    jag(ctx.glow, x, box.top, ctx.to.y - RIM, local, 9, 0xffe7a0, i + 3)
+    jag(ctx.g, x, box.top, ctx.to.y - RIM, local, 1.5, 0xfff6ea, i + 1)
+    mote(ctx, x, endY, 0xfff4c4, 2.2)
     if (local > 0.35) {
       line(ctx.g, { x, y: endY - 24 }, { x: x + 16, y: endY - 8 }, 1.6, 0xfff6ea, 0.8)
       line(ctx.g, { x, y: endY - 24 }, { x: x - 14, y: endY - 6 }, 1.6, 0xfff6ea, 0.8)
@@ -498,27 +494,15 @@ function skyBolt(ctx: BlasterCtx, step: Step, _s: number, count: number): void {
 
 function wedge(ctx: BlasterCtx, step: Step, _s: number): void {
   const n = perpendicular(ctx.from, ctx.to)
-  const wide = 120
   const tip = step.head
-  const left = { x: ctx.from.x + n.x * wide, y: ctx.from.y + n.y * wide }
-  const right = { x: ctx.from.x - n.x * wide, y: ctx.from.y - n.y * wide }
-  ctx.glow.poly([left.x, left.y, right.x, right.y, tip.x, tip.y]).fill({ color: 0xff4a12, alpha: 0.4 })
-  ctx.g.poly([left.x, left.y, right.x, right.y, tip.x, tip.y]).fill({ color: 0xff6a1a, alpha: 0.94 })
-  ctx.g.poly([
-    ctx.from.x + n.x * wide * 0.32,
-    ctx.from.y + n.y * wide * 0.32,
-    ctx.from.x - n.x * wide * 0.32,
-    ctx.from.y - n.y * wide * 0.32,
-    tip.x,
-    tip.y,
-  ]).fill({ color: 0xffe08a, alpha: 0.95 })
-  for (let i = 0; i < 7; i += 1) {
-    const t = clamp(step.u * 1.1 - i * 0.08, 0, 1)
-    const p = lerp(ctx.from, tip, t)
-    const drift = Math.sin(ctx.age * 6 + i) * 16
-    ctx.glow.circle(p.x + n.x * drift, p.y + n.y * drift, 10).fill({ color: 0xffe08a, alpha: 0.4 })
-    ctx.g.circle(p.x + n.x * drift, p.y + n.y * drift, 3.2).fill({ color: 0xfff6ea, alpha: 0.95 })
+  const ease = step.u * step.u * (3 - 2 * step.u)
+  for (let i = 0; i < 9; i += 1) {
+    const side = (i - 4) / 4
+    const start = { x: ctx.from.x + n.x * side * 110, y: ctx.from.y + n.y * side * 110 }
+    const end = lerp(start, tip, ease)
+    filament(ctx, start, end, i % 2 === 0 ? 0xff6a1a : 0xffe08a, 12 + (1 - Math.abs(side)) * 8, 1.6)
   }
+  mote(ctx, tip.x, tip.y, 0xffe08a, 2.8)
 }
 
 function bills(ctx: BlasterCtx, step: Step, _s: number): void {
@@ -529,20 +513,17 @@ function bills(ctx: BlasterCtx, step: Step, _s: number): void {
     const aim = edge(ctx.from, ctx.to)
     const p = lerp(ctx.from, aim, u)
     const burn = u > 0.62 ? (u - 0.62) / 0.38 : 0
-    const side = (i - 5.5) * 11
-    const w = 22 * (1 - burn * 0.4)
-    const h = 12 * (1 - burn * 0.4)
-    ctx.g.roundRect(p.x + n.x * side - w / 2, p.y + n.y * side - h / 2, w, h, 3).fill({
-      color: burn > 0.35 ? 0xff5a1a : 0x7dff6a,
-      alpha: 0.96,
-    })
-    ctx.glow.circle(p.x + n.x * side, p.y + n.y * side, 14).fill({ color: burn > 0.35 ? 0xff5a1a : 0x7dff6a, alpha: 0.28 })
+    const side = (i - 5.5) * 14
+    const here = { x: p.x + n.x * side, y: p.y + n.y * side }
+    const tail = behind(ctx.from, ctx.to, here, 28 * (1 - burn * 0.5))
+    filament(ctx, tail, here, burn > 0.35 ? 0xff5a1a : 0x7dff6a, 7, 1.2)
+    mote(ctx, here.x, here.y, burn > 0.35 ? 0xff5a1a : 0xb8ff9a, 1.6)
   }
   if (step.u > 0.2) {
     const aim = edge(ctx.from, ctx.to)
     const coin = lerp(ctx.from, aim, Math.min(1, step.u))
-    ctx.g.circle(coin.x, coin.y - 18, 7).fill({ color: 0xf0c56a, alpha: 1 })
-    ctx.g.circle(coin.x + 16, coin.y + 8, 5).fill({ color: 0xfff6ea, alpha: 0.9 })
+    ctx.g.circle(coin.x, coin.y - 16, 3).stroke({ width: 1.2, color: 0xf0c56a, alpha: 0.9 })
+    mote(ctx, coin.x + 14, coin.y + 6, 0xf0c56a, 1.5)
   }
 }
 
@@ -550,18 +531,15 @@ function windows(ctx: BlasterCtx, step: Step, _s: number): void {
   const box = sideBox(ctx)
   const y = ctx.to.y - RIM
   const nose = box.x0 + (box.x1 - box.x0) * Math.max(0.08, step.u)
-  line(ctx.g, { x: box.x0, y }, { x: nose, y }, 7, 0x241c12, 0.92)
-  line(ctx.glow, { x: box.x0, y }, { x: nose, y }, 22, 0xffe08a, 0.45)
+  filament(ctx, { x: box.x0, y }, { x: nose, y }, 0xffe08a, 14, 1.4)
   for (let i = 0; i < 10; i += 1) {
     const px = box.x0 + ((nose - box.x0) * (i + 0.5)) / 10
-    ctx.g.rect(px - 6, y - 9, 12, 18).fill({ color: 0xfff6c8, alpha: 1 })
-    ctx.glow.rect(px - 8, y - 11, 16, 22).fill({ color: 0xffe08a, alpha: 0.4 })
+    mote(ctx, px, y, 0xfff6c8, 1.8)
   }
-  ctx.glow.circle(nose, y, 22).fill({ color: 0xfff6c8, alpha: 0.55 })
-  ctx.g.circle(nose, y, 8).fill({ color: 0xffffff, alpha: 1 })
+  mote(ctx, nose, y, 0xffffff, 3)
   for (let i = 0; i < 4; i += 1) {
     const puff = (step.u + i * 0.18) % 1
-    ctx.glow.circle(box.x0 + 30 + i * 28, y - 18 - puff * 36, 8 + puff * 10).fill({ color: 0xfff6ea, alpha: 0.22 })
+    ctx.glow.circle(box.x0 + 30 + i * 28, y - 16 - puff * 28, 6 + puff * 8).fill({ color: 0xfff6ea, alpha: 0.12 })
   }
 }
 
@@ -630,42 +608,13 @@ function strands(ctx: BlasterCtx, step: Step, _s: number): void {
 function climb(ctx: BlasterCtx, step: Step, _s: number): void {
   const box = sideBox(ctx)
   const lip = ctx.to.y + RIM
-  const topY = box.bottom + (lip - box.bottom) * step.u
-  const halfW = 78
-  ctx.glow.poly([
-    ctx.to.x - halfW - 16,
-    box.bottom,
-    ctx.to.x + halfW + 16,
-    box.bottom,
-    ctx.to.x + 18,
-    topY,
-    ctx.to.x - 18,
-    topY,
-  ]).fill({ color: 0xff4a12, alpha: 0.35 })
-  ctx.g.poly([
-    ctx.to.x - halfW,
-    box.bottom,
-    ctx.to.x + halfW,
-    box.bottom,
-    ctx.to.x + 12,
-    topY,
-    ctx.to.x - 12,
-    topY,
-  ]).fill({ color: 0xff3b1f, alpha: 0.9 })
-  ctx.g.poly([
-    ctx.to.x - halfW * 0.35,
-    box.bottom,
-    ctx.to.x + halfW * 0.35,
-    box.bottom,
-    ctx.to.x,
-    topY,
-  ]).fill({ color: 0xffe08a, alpha: 0.95 })
-  for (let i = 0; i < 8; i += 1) {
-    const t = (step.u + i * 0.11) % 1
-    const py = box.bottom + (topY - box.bottom) * t
-    const px = ctx.to.x + Math.sin(i * 1.7 + ctx.age * 5) * (20 + (1 - t) * 40)
-    ctx.glow.circle(px, py, 8).fill({ color: 0xffe08a, alpha: 0.35 })
-    ctx.g.circle(px, py, 2.8).fill({ color: 0xfff6ea, alpha: 0.95 })
+  const rise = box.bottom + (lip - box.bottom) * step.u
+  for (let i = 0; i < 11; i += 1) {
+    const side = (i - 5) * 13
+    const wobble = Math.sin(ctx.age * 5 + i) * 7
+    const top = rise - (i % 3) * 16
+    filament(ctx, { x: ctx.to.x + side, y: box.bottom }, { x: ctx.to.x + side + wobble, y: top }, i % 2 === 0 ? 0xff4a12 : 0xffe08a, 7, 1.2)
+    if (i % 2 === 0) mote(ctx, ctx.to.x + side + wobble, top, 0xffe08a, 1.5)
   }
 }
 
@@ -675,13 +624,11 @@ function crescent(ctx: BlasterCtx, step: Step, _s: number): void {
   const dist = Math.max(RIM + 8, Math.hypot(ctx.to.x - cx, ctx.to.y - cy) - RIM)
   const reach = Math.max(18, dist * Math.max(0.18, step.u))
   const ang = Math.atan2(ctx.to.y - cy, ctx.to.x - cx)
-  ctx.glow.arc(cx, cy, reach, ang - 1.2, ang + 1.2).stroke({ width: 18, color: 0xf0c56a, alpha: 0.35 })
-  ctx.g.arc(cx, cy, reach, ang - 1.15, ang + 1.15).stroke({ width: 4, color: 0xfff6ea, alpha: 1 })
-  ctx.g.arc(cx, cy, reach, ang - 0.55, ang + 0.55).stroke({ width: 1.6, color: 0xffffff, alpha: 0.95 })
-  ctx.glow.arc(cx, cy, Math.max(12, reach - 10), ang - 0.9, ang + 0.9).stroke({ width: 8, color: 0xffffff, alpha: 0.25 })
+  ctx.glow.arc(cx, cy, reach, ang - 1.2, ang + 1.2).stroke({ width: 10, color: 0xf0c56a, alpha: 0.28 })
+  ctx.g.arc(cx, cy, reach, ang - 1.15, ang + 1.15).stroke({ width: 1.6, color: 0xfff6ea, alpha: 0.95 })
+  ctx.g.arc(cx, cy, reach, ang - 0.4, ang + 0.4).stroke({ width: 1, color: 0xffffff, alpha: 0.8 })
   const tip = { x: cx + Math.cos(ang) * reach, y: cy + Math.sin(ang) * reach }
-  ctx.glow.circle(tip.x, tip.y, 18).fill({ color: 0xf0c56a, alpha: 0.5 })
-  ctx.g.circle(tip.x, tip.y, 4).fill({ color: 0xffffff, alpha: 1 })
+  mote(ctx, tip.x, tip.y, 0xf0c56a, 2.4)
 }
 
 function mane(ctx: BlasterCtx, step: Step, _s: number): void {
@@ -747,8 +694,8 @@ function hole(ctx: BlasterCtx, step: Step): void {
   const spin = ctx.age * 1.6
   ctx.g.circle(cx, cy, Math.max(12, radius * 0.82)).fill({ color: 0x000000, alpha: 0.86 * Math.min(1, open * 1.4) })
   ctx.g.circle(cx, cy, Math.max(8, radius * 0.34)).fill({ color: 0x000000, alpha: 0.96 })
-  ctx.glow.circle(cx, cy, Math.max(16, radius)).stroke({ width: 34, color: 0xf0c56a, alpha: 0.55 })
-  ctx.g.circle(cx, cy, Math.max(16, radius)).stroke({ width: 3.5, color: 0xfff6ea, alpha: 1 })
+  ctx.glow.circle(cx, cy, Math.max(16, radius)).stroke({ width: 16, color: 0xf0c56a, alpha: 0.4 })
+  ctx.g.circle(cx, cy, Math.max(16, radius)).stroke({ width: 1.6, color: 0xfff6ea, alpha: 0.9 })
   for (let arm = 0; arm < 3; arm += 1) {
     ctx.g.moveTo(cx + Math.cos(spin + arm) * radius * 0.2, cy + Math.sin(spin + arm) * radius * 0.2)
     for (let i = 1; i <= 16; i += 1) {
@@ -830,26 +777,23 @@ function bombDrop(ctx: BlasterCtx, step: Step, id: LiveId): void {
     const x = land.x
     const y = y0 + (land.y - y0) * fall
     if (fall < 1) {
-      const shell = 14 + rank * 9
-      ctx.glow.circle(x, y, shell * 2.2).fill({ color, alpha: 0.55 })
-      ctx.g.circle(x, y, shell).fill({ color, alpha: 0.96 })
-      ctx.g.circle(x, y - shell * 0.28, shell * 0.42).fill({ color: 0xffffff, alpha: 1 })
-      line(ctx.glow, { x, y: y - shell * 4.2 }, { x, y: y - shell * 0.8 }, 12 + rank * 4, color, 0.6)
+      const trail = 36 + rank * 18
+      filament(ctx, { x, y: y - trail }, { x, y }, color, 6 + rank * 2, 1.2)
+      mote(ctx, x, y, color, 1.6 + rank * 0.4)
       continue
     }
     const boom = (u - 0.78) / 0.22
     const fade = 1 - clamp(step.k / (rank >= 2 ? 0.9 : 0.5), 0, 1)
-    const blastR = (48 + rank * 34) * (0.55 + boom * 0.45)
-    ctx.glow.circle(land.x, land.y, blastR * 0.72).fill({ color, alpha: 0.28 * fade })
-    ctx.glow.circle(land.x, land.y, blastR).stroke({ width: 16 + rank * 8, color, alpha: 0.5 * fade })
-    ctx.g.circle(land.x, land.y, blastR).stroke({ width: 3, color: 0xffffff, alpha: 0.95 * fade })
-    ctx.g.circle(land.x, land.y, blastR * 0.5).stroke({ width: 2, color, alpha: 0.8 * fade })
+    const blastR = (28 + rank * 18) * (0.45 + boom * 0.55)
+    ctx.glow.circle(land.x, land.y, blastR).stroke({ width: 8 + rank * 3, color, alpha: 0.28 * fade })
+    ctx.g.circle(land.x, land.y, blastR).stroke({ width: 1.3, color: 0xffffff, alpha: 0.85 * fade })
+    ctx.g.circle(land.x, land.y, blastR * 0.55).stroke({ width: 1, color, alpha: 0.55 * fade })
     const streaks = 5 + rank
     for (let shard = 0; shard < streaks; shard += 1) {
       const a = (shard / streaks) * Math.PI * 2 + i * 0.4
       const inner = blastR * 0.72
       const outer = blastR * (1.05 + boom * 0.25)
-      line(ctx.g, { x: land.x + Math.cos(a) * inner, y: land.y + Math.sin(a) * inner }, { x: land.x + Math.cos(a) * outer, y: land.y + Math.sin(a) * outer }, 3.2, 0xfff6ea, fade)
+      line(ctx.g, { x: land.x + Math.cos(a) * inner, y: land.y + Math.sin(a) * inner }, { x: land.x + Math.cos(a) * outer, y: land.y + Math.sin(a) * outer }, 1.3, 0xfff6ea, fade * 0.8)
     }
   }
 }

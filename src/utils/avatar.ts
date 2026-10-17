@@ -1,14 +1,11 @@
 import type { TeamId } from '../types/Team.ts'
 
-const PORTRAITS = 60
-/** 47.jpg is a byte-for-byte copy of 45.jpg, so it stays out of the pool. */
-const SKIP = new Set([47])
-
-const POOL: string[] = []
-for (let slot = 1; slot <= PORTRAITS; slot += 1) {
-  if (SKIP.has(slot)) continue
-  POOL.push(String(slot).padStart(2, '0'))
+/** Illustrated stand-ins. Real viewers keep their own photos. */
+const CUTE: Record<TeamId, readonly string[]> = {
+  red: ['ca-anime', 'ca-fox'],
+  blue: ['us-anime', 'us-husky'],
 }
+const POOL = [...CUTE.red, ...CUTE.blue]
 
 interface PortraitUse {
   red: number
@@ -23,15 +20,17 @@ function emptyUse(): PortraitUse {
 }
 
 function localArt(file: string): { key: string; url: string } {
-  return { key: `local:${file}`, url: `/avatars/${file}.jpg` }
+  return { key: `cute:${file}`, url: `/avatars/cute/${file}.jpg` }
 }
 
 function fileOf(url: string): string | null {
-  const match = /\/avatars\/(\d+)\.(?:jpg|jpeg|png|webp)$/i.exec(url.trim())
+  const match = /\/avatars\/cute\/(ca-anime|ca-fox|us-anime|us-husky)\.(?:jpg|jpeg|png|webp)$/i.exec(url.trim())
   if (!match) return null
-  const slot = Number(match[1])
-  if (!Number.isFinite(slot) || slot < 1 || slot > PORTRAITS || SKIP.has(slot)) return null
-  return String(slot).padStart(2, '0')
+  return match[1].toLowerCase()
+}
+
+function teamFiles(team: TeamId): readonly string[] {
+  return CUTE[team]
 }
 
 function useOf(file: string): PortraitUse {
@@ -71,21 +70,22 @@ export function claimDummyAvatar(id: string, team: TeamId, preferredUrl = ''): {
   if (owned) return localArt(owned.file)
 
   const preferred = fileOf(preferredUrl)
-  if (preferred && !usage.has(preferred)) {
+  const choices = teamFiles(team)
+  if (preferred && choices.includes(preferred) && !usage.has(preferred)) {
     assign(id, team, preferred)
     return localArt(preferred)
   }
 
-  for (const file of POOL) {
+  for (const file of choices) {
     if (usage.has(file)) continue
     assign(id, team, file)
     return localArt(file)
   }
 
-  let best = POOL[0] ?? '01'
+  let best = choices[0] ?? 'ca-anime'
   let bestOpposite = Number.POSITIVE_INFINITY
   let bestOwn = Number.POSITIVE_INFINITY
-  for (const file of POOL) {
+  for (const file of choices) {
     const row = usage.get(file) ?? emptyUse()
     const other = team === 'red' ? row.blue : row.red
     const own = row[team]
@@ -113,10 +113,10 @@ export function safeAvatarUrl(url: string, initials: string, hue: number, seed: 
 export function makeAvatar(initials: string, hue: number, seed: number): { key: string; url: string } {
   const start = Math.abs(seed + initials.length * 13 + hue) % POOL.length
   for (let step = 0; step < POOL.length; step += 1) {
-    const file = POOL[(start + step) % POOL.length] ?? '01'
+    const file = POOL[(start + step) % POOL.length] ?? 'ca-anime'
     if (!usage.has(file)) return localArt(file)
   }
-  return localArt(POOL[start] ?? '01')
+  return localArt(POOL[start] ?? 'ca-anime')
 }
 
 export function isRemoteAvatar(url: string): boolean {

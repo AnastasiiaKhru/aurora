@@ -6,7 +6,7 @@ import { formatScore } from '../utils/format.ts'
 export function VictoryScreen({ victory, elapsed = 0 }: { victory: VictoryState | null; elapsed?: number }) {
   if (!victory) return null
   const side = victory.result === 'draw' ? null : victory.result
-  const name = side ? battleConfig.teamNames[side] : 'Drawn'
+  const name = side ? battleConfig.teamHud[side] : 'Drawn'
   const [mvp, ...runners] = victory.top
   const closing = elapsed >= 8_000
   const beat = !closing ? null : elapsed < 9_000 ? 3 : elapsed < 10_000 ? 2 : 1
@@ -80,12 +80,11 @@ function Face({ player }: { player: LeaderboardEntry }) {
 }
 
 function Flag({ team }: { team: 'red' | 'blue' }) {
-  return <span className="victory-flag">{team === 'red' ? '🇨🇦' : '🇺🇸'}</span>
+  return <span className="victory-flag">{battleConfig.teamMark[team]}</span>
 }
 
 function Mark({ team }: { team: 'red' | 'blue' }) {
-  if (team === 'red') return <img className="victory-mark" src="/maple-leaf.png" alt="" />
-  return <UsaStar />
+  return <span className="victory-mark">{battleConfig.teamMark[team]}</span>
 }
 
 function Crown({ place = 1 }: { place?: number }) {
@@ -102,10 +101,3 @@ function Crown({ place = 1 }: { place?: number }) {
   )
 }
 
-function UsaStar() {
-  return (
-    <svg className="victory-mark" viewBox="0 0 16 16" aria-hidden="true">
-      <path fill="currentColor" d="M8 1.2 9.7 5.4 14.2 5.7 10.8 8.6 11.9 13 8 10.7 4.1 13 5.2 8.6 1.8 5.7 6.3 5.4 8 1.2z" />
-    </svg>
-  )
-}

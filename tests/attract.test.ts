@@ -61,6 +61,7 @@ test('npc damage stays tiny, cannot eliminate, and cannot decide a winner', () =
 })
 
 test('npcs pause for a full room and resume only after the idle wait', () => {
+  attractModeConfig.enabled = true
   const clock = new AttractClock()
   assert.equal(clock.step(0, { red: 2, blue: 2 }, () => 0.5), null)
   assert.equal(clock.mode, 'paused')
@@ -72,9 +73,11 @@ test('npcs pause for a full room and resume only after the idle wait', () => {
   const again = new AttractClock()
   again.step(0, { red: 1, blue: 0 }, () => 0.9)
   assert.equal(again.mode, 'reduced')
+  attractModeConfig.enabled = false
 })
 
 test('one clock does not fire twice for the same moment and a restart clears the budget', () => {
+  attractModeConfig.enabled = true
   const clock = new AttractClock()
   clock.step(0, { red: 0, blue: 0 }, () => 0.9)
   const due = clock.nextAt
@@ -95,4 +98,5 @@ test('one clock does not fire twice for the same moment and a restart clears the
     () => true,
   )
   assert.deepEqual(counts, { red: 0, blue: 1 })
+  attractModeConfig.enabled = false
 })

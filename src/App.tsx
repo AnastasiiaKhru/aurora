@@ -8,7 +8,8 @@ import { attachTikTokAdapter } from './integrations/tiktok/index.ts'
 import { LiveTikTokAdapter, tiktokSocketUrl } from './integrations/tiktok/LiveTikTokAdapter.ts'
 import { mockTikTok } from './integrations/tiktok/MockTikTokAdapter.ts'
 import type { LiveChatPayload, LiveLinkPhase, LiveLinkStatus } from './integrations/tiktok/liveMessages.ts'
-import { DESIGN_HEIGHT, DESIGN_WIDTH, broadcastScale, fitCaptureWindow, isCaptureMode, openCaptureWindow } from './broadcast/stage.ts'
+import { broadcastScale, fitCaptureWindow, isCaptureMode, openCaptureWindow } from './broadcast/stage.ts'
+import { battleConfig } from './config/battleConfig.ts'
 import { director } from './systems/GameDirector.ts'
 import { MusicStatusIndicator } from './components/MusicStatusIndicator.tsx'
 import { PreflightPanel } from './components/PreflightPanel.tsx'
@@ -18,7 +19,7 @@ import { canEnableLive, noteConsoleError, preflightVersion, recordLiveEvent, set
 type SourceMode = 'simulator' | 'private' | 'live'
 
 function describeLiveEvent(event: TikTokLiveEvent): string {
-  if (event.type === 'viewerJoined') return `@${event.payload.username} joined ${event.payload.team}`
+  if (event.type === 'viewerJoined') return `@${event.payload.username} joined ${battleConfig.teamNames[event.payload.team]}`
   if (event.type === 'viewerLeft') return `@${event.payload.username} left`
   if (event.type === 'likeReceived') return `@${event.payload.username} liked ${event.payload.count}`
   if (event.type === 'followReceived') return `@${event.payload.username} followed`
@@ -42,7 +43,7 @@ function BroadcastFrame({ className, children, native = false }: { className: st
     const stage = stageRef.current
     if (!stage) return
     const apply = () => {
-      const scale = native ? 1 : Math.min(window.innerWidth / DESIGN_WIDTH, window.innerHeight / DESIGN_HEIGHT)
+      const scale = native ? 1 : broadcastScale()
       stage.style.transform = 'none'
       stage.style.zoom = String(scale)
     }
@@ -133,7 +134,15 @@ function BattleView() {
 }
 
 function AlisaCard() {
-  return <img className="alisa-sticker" src="/alisa-sticker.png" alt="Hi! I’m Alisa. I built this game. Comment C or U to join!" />
+  return (
+    <div className="alisa-card">
+      <img className="alisa-sticker" src="/alisa-sticker.png" alt="" />
+      <p className="alisa-built">I built this game</p>
+      <p className="alisa-join">
+        Choose your side <b className="cmd-c">A</b> or <b className="cmd-u">B</b>
+      </p>
+    </div>
+  )
 }
 
 function AdminView() {

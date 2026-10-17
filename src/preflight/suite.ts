@@ -72,6 +72,9 @@ function fail(errors: string[]): LogicResult['status'] {
 export function checkJoin(): LogicResult {
   const errors: string[] = []
   const expect: Array<[string, TeamId | null]> = [
+    ['A', 'red'],
+    ['a', 'red'],
+    ['À', 'red'],
     ['C', 'red'],
     ['c', 'red'],
     [' C ', 'red'],
@@ -80,6 +83,9 @@ export function checkJoin(): LogicResult {
     ['ca', 'red'],
     ['CA!', 'red'],
     ['canadian', 'red'],
+    ['B', 'blue'],
+    ['b', 'blue'],
+    ['Ｂ', 'blue'],
     ['U', 'blue'],
     ['u', 'blue'],
     [' U ', 'blue'],

@@ -19,7 +19,7 @@ export const attractModePlayers = {
 } as const
 
 export const attractModeConfig = {
-  enabled: true,
+  enabled: false,
   activateBelowRealPlayers: 2,
   resumeAfterIdleMs: 20_000,
   minimumAttackDelayMs: 4_000,

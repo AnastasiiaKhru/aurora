@@ -21,15 +21,7 @@ import { otherTeam } from '../utils/team.ts'
 import { acceptEvent, acceptSocial, decideJoin, likeShotPlan } from '../preflight/rules.ts'
 import { AttractClock, allowedNpcDamage, applyNpcHealth, attractModeConfig, attractModePlayers, isGeneratedId, isNpcId, realTeamCounts } from './attractMode.ts'
 import { rankVictory } from './victoryRank.ts'
-import {
-  AUTO_BATTLE_CONFIG,
-  AutoBattleClock,
-  ambientAttackDamage,
-  autoLog,
-  bigAutoAttackById,
-  isFieldDummy,
-  type AutoAction,
-} from './autoBattle.ts'
+import { AUTO_BATTLE_CONFIG, AutoBattleClock } from './autoBattle.ts'
 import { noteConsoleError } from '../preflight/session.ts'
 import { cinemaOf } from '../game/attacks/cinema.ts'
 import { styles, type AttackStyle } from '../game/attacks/style.ts'
@@ -429,11 +421,24 @@ export class GameDirector {
     if (explicit) console.log(`TEAM COMMAND DETECTED: ${teamLabel(preferred)} @${username}`)
     let existing = this.players.players.get(userId) ?? this.viewerByName(username) ?? null
     if (explicit) console.log(`PLAYER FOUND: ${existing ? 'true' : 'false'}`)
-    if (existing && explicit && this.isDefeated(existing.id)) {
+    if (existing && this.isDefeated(existing.id)) {
       console.log(`PLAYER DEFEATED - REJOINING @${username}`)
-      this.roster.delete(existing.id)
-      this.players.remove(existing.id)
-      existing = null
+      if (avatarUrl) this.players.refreshAvatar(existing.id, avatarUrl)
+      if (explicit && existing.team !== preferred) {
+        console.log(`CURRENT TEAM: ${teamLabel(existing.team)}`)
+        console.log(`SWITCHING ${teamLabel(existing.team)} -> ${teamLabel(preferred)}`)
+        this.players.setTeam(existing.id, preferred)
+        this.chosenTeams.set(`explicit:${existing.id}`, preferred)
+        this.rememberTeam(existing.id, username, preferred)
+      } else if (explicit) {
+        this.chosenTeams.set(`explicit:${existing.id}`, existing.team)
+        this.rememberTeam(existing.id, username, existing.team)
+      }
+      this.players.respawn(existing.id)
+      this.rememberMember(existing.id)
+      if (explicit) this.handleComment(existing.id, username, avatarUrl)
+      this.shareNow()
+      return
     }
     const decision = decideJoin(existing, preferred, explicit)
     if (existing && decision === 'keep') {
@@ -445,6 +450,7 @@ export class GameDirector {
       }
       this.rememberTeam(existing.id, username, existing.team)
       this.rememberMember(existing.id)
+      if (explicit) this.handleComment(existing.id, username, avatarUrl)
       if (explicit) this.shareNow()
       return
     }
@@ -461,6 +467,7 @@ export class GameDirector {
       this.rememberMember(existing.id)
       if (from) this.switchNotes.push({ id: existing.id, text: `@${username} → ${teamFlag(preferred)} ${teamLabel(preferred)}`, team: preferred, fromX: from.x, fromY: from.y, fromTeam: from.team })
       if (this.switchNotes.length > 12) this.switchNotes.splice(0, this.switchNotes.length - 12)
+      if (explicit) this.handleComment(existing.id, username, avatarUrl)
       this.shareNow()
       return
     }
@@ -480,6 +487,7 @@ export class GameDirector {
     }
     this.rememberTeam(id, username, preferred)
     this.rememberMember(id)
+    if (explicit) this.handleComment(id, username, avatarUrl)
     this.shareNow()
   }
 
@@ -507,7 +515,7 @@ export class GameDirector {
     this.roster.delete(userId)
     this.players.remove(userId)
     if (this.selectedId === userId) this.selectedId = null
-    this.pushFeed(`@${username} left ${team.toUpperCase()}`, team, 'neutral')
+    this.pushFeed(`@${username} left ${battleConfig.teamHud[team]}`, team, 'neutral')
     this.publish()
   }
 
@@ -859,7 +867,7 @@ export class GameDirector {
       }
       return
     }
-    this.stepAttract(dt, now, true)
+    this.stepAttract(dt, now, false)
     const motion = dt * (this.hitStop > 0 ? 0.38 : 1)
     this.hitStop = Math.max(0, this.hitStop - dt)
     if (this.battle.status === 'countdown' && !this.roundId) this.publishRound(Date.now())
@@ -894,8 +902,6 @@ export class GameDirector {
         this.dirty = true
       }
     }
-
-    this.stepAutoBattle(now)
 
     this.conclude()
     const signals = this.battle.tick(dt)
@@ -1064,7 +1070,7 @@ export class GameDirector {
     if (existing) {
       if (existing.team !== team && !this.isLocked(existing.id)) {
         this.players.setTeam(existing.id, team)
-        this.pushFeed(`@${event.username} joined ${team.toUpperCase()}`, team, team)
+        this.pushFeed(`@${event.username} joined ${battleConfig.teamHud[team]}`, team, team)
       }
       this.rememberMember(existing.id)
       return existing.team
@@ -1078,7 +1084,7 @@ export class GameDirector {
       initials: initialsOf(event.username),
     })
     this.rememberMember(event.userId)
-    this.pushFeed(`@${event.username} joined ${team.toUpperCase()}`, team, team)
+    this.pushFeed(`@${event.username} joined ${battleConfig.teamHud[team]}`, team, team)
     return team
   }
 
@@ -1167,7 +1173,7 @@ export class GameDirector {
       particleIntensity: intensity,
       sound: 'whoosh',
       priority: 3,
-      username: team.toUpperCase(),
+      username: battleConfig.teamHud[team],
       giftName: label,
       combo: 1,
       rarity: intensity > 0.9 ? 'medium' : 'small',
@@ -1284,6 +1290,7 @@ export class GameDirector {
     const existing = (userId ? this.players.players.get(userId) : undefined) ?? this.viewerByName(username)
     if (existing) {
       if (avatarUrl) this.players.refreshAvatar(existing.id, avatarUrl)
+      if (this.isDefeated(existing.id)) this.players.respawn(existing.id)
       if (existing.team !== team && !this.isLocked(existing.id)) this.players.setTeam(existing.id, team)
       this.rememberMember(existing.id)
       return existing.id
@@ -1418,7 +1425,7 @@ export class GameDirector {
   private restoreRoster(): void {
     for (const member of this.roster.values()) {
       if (this.players.players.has(member.id)) continue
-      this.players.add({
+      const player = this.players.add({
         id: member.id,
         username: member.username,
         team: member.team,
@@ -1426,6 +1433,8 @@ export class GameDirector {
         avatarKey: member.avatarKey,
         initials: member.initials,
       })
+      const kept = this.players.savedBattlePoints(member.id)
+      if (kept > 0) player.battlePoints = kept
     }
   }
 
@@ -1882,7 +1891,7 @@ export class GameDirector {
       announcement: this.announcement ? { ...this.announcement } : null,
       powerFlash: this.powerFlash ? { ...this.powerFlash } : null,
       rush: this.momentum.rush ? { ...this.momentum.rush } : null,
-      leaderboard: this.players.leaderboard(5),
+      leaderboard: this.players.leaderboard(12),
       victory: this.battle.status === 'victory' ? this.battle.victory : null,
       victoryMs: this.battle.victoryElapsed,
       round: this.roundNumber,
@@ -1913,123 +1922,6 @@ export class GameDirector {
     }
     this.attract.ease(dt, posing)
     if (launch && fire && this.combatOpen && !AUTO_BATTLE_CONFIG.enabled) this.fireNpc(fire)
-  }
-
-  private stepAutoBattle(now: number): void {
-    const actions = this.autoBattle.step(now, {
-      running: this.battle.status === 'running',
-      round: this.combatRound,
-      busy: this.announcement != null || this.powerFlashLeft > 0.05 || this.attacks.winding || this.cinemaLive,
-      alive: (team) => this.livingDummies(team),
-    })
-    for (const action of actions) this.applyAutoAction(action)
-  }
-
-  private livingDummies(team: TeamId): string[] {
-    const ids: string[] = []
-    for (const player of this.players.players.values()) {
-      if (player.team !== team || !isFieldDummy(player)) continue
-      const body = this.players.bodies.get(player.id)
-      if (!body || body.hp <= 0 || body.dying > 0 || body.shown === 0) continue
-      ids.push(player.id)
-    }
-    return ids
-  }
-
-  private applyAutoAction(action: AutoAction): void {
-    if (action.type === 'cancel') {
-      this.releaseAutoPose(action.actorId)
-      return
-    }
-    if (action.type === 'charge') {
-      this.beginAutoCharge(action.actorId)
-      return
-    }
-    if (action.type === 'basic') this.fireAutoBasic(action.team, action.actorId)
-    else this.fireAutoBig(action.team, action.actorId, action.attackId)
-  }
-
-  private beginAutoCharge(id: string): void {
-    const peak = AUTO_BATTLE_CONFIG.bigScale
-    this.players.cast(id, peak, 0, false)
-    const body = this.players.bodies.get(id)
-    if (!body) return
-    body.poseHold = (AUTO_BATTLE_CONFIG.bigChargeMs + 280) / 1000
-    body.posePeak = peak
-    this.players.swell(id, 0.62, body.poseHold)
-  }
-
-  private releaseAutoPose(id: string): void {
-    const body = this.players.bodies.get(id)
-    if (!body) return
-    body.poseHold = 0
-    body.surgeHold = 0
-    if (body.poseMode > 0) {
-      body.poseMode = 3
-      body.poseClock = 0
-    }
-  }
-
-  private fireAutoBasic(team: TeamId, id: string): void {
-    const body = this.players.bodies.get(id)
-    const player = this.players.players.get(id)
-    if (!body || !player || !isFieldDummy(player)) return
-    this.players.cast(id, AUTO_BATTLE_CONFIG.basicScale, 0, false)
-    const foe = this.players.livingPoint(otherTeam(team))
-    this.launch({
-      attackType: 'energy_bullet',
-      team,
-      fromX: body.x,
-      fromY: body.y,
-      toX: foe?.x ?? (team === 'red' ? 0.76 : 0.24),
-      toY: foe?.y ?? body.y,
-      targetId: foe?.id,
-      intensity: 0.55,
-      duration: 0.92,
-      damage: ambientAttackDamage(0, 'basic'),
-      shake: 'none',
-      particleIntensity: 0.32,
-      sound: 'projectile',
-      priority: 1,
-      username: player.username,
-      giftName: 'TikTok',
-      combo: 1,
-      rarity: 'micro',
-      impacts: attackImpacts.energy_bullet,
-      ambient: true,
-    }, AUTO_BATTLE_CONFIG.basicWindupMs)
-    autoLog(`[AUTO] ${team === 'red' ? 'Canada' : 'USA'} basic attack`)
-  }
-
-  private fireAutoBig(team: TeamId, id: string, attackId: string): void {
-    const spec = bigAutoAttackById(attackId)
-    const body = this.players.bodies.get(id)
-    const player = this.players.players.get(id)
-    if (!spec || !body || !player || !isFieldDummy(player)) return
-    const foe = this.players.livingPoint(otherTeam(team))
-    this.launch({
-      attackType: spec.attackType,
-      team,
-      fromX: body.x,
-      fromY: body.y,
-      toX: foe?.x ?? (team === 'red' ? 0.76 : 0.24),
-      toY: foe?.y ?? body.y,
-      targetId: foe?.id,
-      intensity: spec.intensity,
-      duration: spec.duration,
-      damage: ambientAttackDamage(spec.baseDamage, 'big'),
-      shake: spec.shake,
-      particleIntensity: spec.particleIntensity,
-      sound: spec.sound,
-      priority: 2,
-      username: player.username,
-      giftName: spec.giftName,
-      combo: 1,
-      rarity: spec.rarity,
-      impacts: spec.impacts,
-      ambient: true,
-    })
-    autoLog(`[AUTO BIG] ${team === 'red' ? 'Canada' : 'USA'} / ${spec.id} / ${id}`)
   }
 
   private retireGuardians(): void {
@@ -2094,12 +1986,12 @@ function countdownStep(elapsed: number): { label: string; level: number } | null
   return { label: String(5 - index), level: index + 1 }
 }
 
-function teamLabel(team: TeamId): 'CANADA' | 'USA' {
-  return team === 'red' ? 'CANADA' : 'USA'
+function teamLabel(team: TeamId): string {
+  return battleConfig.teamNames[team]
 }
 
 function teamFlag(team: TeamId): string {
-  return team === 'red' ? '🇨🇦' : '🇺🇸'
+  return battleConfig.teamMark[team]
 }
 
 const COMMENT_FX: AttackType[] = ['sparkle_shot', 'heart', 'rose', 'ice', 'magic', 'energy_bullet']

@@ -31,7 +31,7 @@ export class MomentumSystem {
     this.rush = {
       id: `rush-${this.nonce++}`,
       team,
-      label: team === 'red' ? 'CANADA RUSH' : 'USA RUSH',
+      label: `${battleConfig.teamHud[team]} RUSH`,
     }
     return this.rush
   }

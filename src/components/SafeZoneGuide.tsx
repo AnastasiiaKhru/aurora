@@ -32,15 +32,15 @@ function TikTokOverlayPreview() {
         <i />
       </div>
       <div className="tt-notes">
-        <p>alex joined Canada</p>
+        <p>alex joined No Toilet Paper</p>
         <p>sam liked the LIVE</p>
         <p>mia sent Rose</p>
       </div>
       <div className="tt-chat">
-        <p><b>alex</b> C</p>
+        <p><b>alex</b> A</p>
         <p><b>sam</b> this battle is close</p>
-        <p><b>mia</b> U</p>
-        <p><b>jordan</b> go Canada</p>
+        <p><b>mia</b> B</p>
+        <p><b>jordan</b> go No Toilet Paper</p>
       </div>
       <div className="tt-input">
         <span>Add comment...</span>

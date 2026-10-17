@@ -14,17 +14,17 @@ export function otherTeam(team: TeamId): TeamId {
   return team === 'red' ? 'blue' : 'red'
 }
 
-const CANADA = new Set(['c', 'ca', 'can', 'canada', 'canadian', 'canadians', 'maple', 'teamc', 'teamca', 'teamcanada', 'canda', 'cananda', 'cannada'])
-const USA = new Set(['u', 'us', 'usa', 'america', 'american', 'americans', 'teamu', 'teamus', 'teamusa', 'unitedstates'])
+const PAPER = new Set(['a', 'teama', 'notoiletpaper', 'toiletpaper', 'notp', 'c', 'ca', 'can', 'canada', 'canadian', 'canadians', 'maple', 'teamc', 'teamca', 'teamcanada', 'canda', 'cananda', 'cannada'])
+const PHONE = new Set(['b', 'teamb', 'nophone', 'nophoneforamonth', 'u', 'us', 'usa', 'america', 'american', 'americans', 'teamu', 'teamus', 'teamusa', 'unitedstates'])
 
 /** A whole comment that names one side. Sentences like "cute" or "c u later" stay ordinary chat. */
 export function teamCommand(text: string): TeamId | null {
   const raw = String(text ?? '').replace(/[\u200b-\u200d\ufeff]/g, '').replace(/\u00a0/g, ' ').trim().toLowerCase()
-  if (raw === '🇨🇦' || raw === '🍁') return 'red'
-  if (raw === '🇺🇸') return 'blue'
-  const command = raw.replace(/[^a-z]/g, '')
-  if (CANADA.has(command)) return 'red'
-  if (USA.has(command)) return 'blue'
+  if (raw === '🧻' || raw === '🇨🇦' || raw === '🍁') return 'red'
+  if (raw === '📵' || raw === '🇺🇸') return 'blue'
+  const command = raw.normalize('NFKD').replace(/\p{M}/gu, '').replace(/[^a-z]/g, '')
+  if (PAPER.has(command)) return 'red'
+  if (PHONE.has(command)) return 'blue'
   return null
 }
 

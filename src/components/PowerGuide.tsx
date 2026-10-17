@@ -31,7 +31,7 @@ export function HelpActions() {
 export function JoinPrompt() {
   return (
     <p className="join-banner join-instruction">
-      COMMENT <b className="cmd-c">C</b> OR <b className="cmd-u">U</b> TO JOIN
+      WOULD YOU RATHER?
     </p>
   )
 }

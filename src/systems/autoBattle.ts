@@ -14,7 +14,7 @@ export const AUTO_BASIC_DAMAGE = 0.1
 export const AUTO_BIG_ATTACK_DAMAGE_MULTIPLIER = 0.00015
 
 export const AUTO_BATTLE_CONFIG = {
-  enabled: true,
+  enabled: false,
   basicIntervalMs: 5_000,
   teamOffsetMs: 2_500,
   basicJitterMs: 400,

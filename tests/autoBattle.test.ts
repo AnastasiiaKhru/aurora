@@ -94,6 +94,7 @@ test('ambient damage stays tiny and does not change real gift damage', () => {
 })
 
 test('each team keeps one basic attacker and fires on a staggered 5 second rhythm', () => {
+  AUTO_BATTLE_CONFIG.enabled = true
   const clock = new AutoBattleClock()
   const red = ['p1', 'p2']
   const blue = ['p8', 'p9']
@@ -132,9 +133,11 @@ test('each team keeps one basic attacker and fires on a staggered 5 second rhyth
   }
   assert.ok(canada.length >= 4)
   assert.ok(usa.length >= 4)
+  restoreConfig()
 })
 
 test('a dead auto attacker is replaced by another dummy and never by silence turning into a burst', () => {
+  AUTO_BATTLE_CONFIG.enabled = true
   const clock = new AutoBattleClock()
   let red = ['p1', 'p2']
   clock.step(0, query(red, ['p8'], () => 0))
@@ -148,9 +151,11 @@ test('a dead auto attacker is replaced by another dummy and never by silence tur
   assert.equal(clock.canadaAutoAttacker, null)
   const again = clock.step(9_200, query([], ['p8'], () => 0))
   assert.equal(basics(again, 'red').length, 0)
+  restoreConfig()
 })
 
 test('big attacks alternate teams, vary the attack, and never stack', () => {
+  AUTO_BATTLE_CONFIG.enabled = true
   const clock = new AutoBattleClock()
   const charges: { t: number; team: TeamId; attackId: string; actorId: string }[] = []
   const launches: { t: number; team: TeamId }[] = []
@@ -175,9 +180,11 @@ test('big attacks alternate teams, vary the attack, and never stack', () => {
     assert.ok(windup >= AUTO_BATTLE_CONFIG.bigChargeMs && windup < AUTO_BATTLE_CONFIG.bigChargeMs + 50)
   }
   assert.ok(actors.size >= 2)
+  restoreConfig()
 })
 
 test('a real viewer event delays a big attack that is about to start', () => {
+  AUTO_BATTLE_CONFIG.enabled = true
   AUTO_BATTLE_CONFIG.bigAttackMinDelayMs = 1_000
   AUTO_BATTLE_CONFIG.bigAttackMaxDelayMs = 1_000
   AUTO_BATTLE_CONFIG.basicIntervalMs = 100_000
@@ -196,6 +203,7 @@ test('a real viewer event delays a big attack that is about to start', () => {
 })
 
 test('restarting the battle does not stack schedulers', () => {
+  AUTO_BATTLE_CONFIG.enabled = true
   const clock = new AutoBattleClock()
   const count = (round: number) => {
     clock.step(0, query(['p1'], ['p8'], () => 0.5, false, round))
@@ -213,9 +221,11 @@ test('restarting the battle does not stack schedulers', () => {
   assert.equal(second, third)
   assert.ok(first > 0)
   assert.ok(first < 12)
+  restoreConfig()
 })
 
 test('basic shots stay quiet while a big attack plays, then the rhythm continues', () => {
+  AUTO_BATTLE_CONFIG.enabled = true
   const clock = new AutoBattleClock()
   const stamps: number[] = []
   let charged = false
@@ -231,10 +241,11 @@ test('basic shots stay quiet while a big attack plays, then the rhythm continues
   }
   assert.equal(charged, true)
   for (let i = 1; i < stamps.length; i += 1) assert.ok(stamps[i]! - stamps[i - 1]! >= 2_000)
+  restoreConfig()
 })
 
 test('production timing stays slow enough that viewers still decide the match', () => {
-  assert.equal(AUTO_BATTLE_CONFIG.enabled, true)
+  assert.equal(AUTO_BATTLE_CONFIG.enabled, false)
   assert.equal(AUTO_BATTLE_CONFIG.debug, false)
   assert.equal(AUTO_BATTLE_CONFIG.basicIntervalMs, 5_000)
   assert.equal(AUTO_BATTLE_CONFIG.teamOffsetMs, 2_500)

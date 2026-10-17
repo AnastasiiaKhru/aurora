@@ -6,7 +6,7 @@ export const attackLab = {
   speed: 1,
   density: 1,
   shake: 1,
-  volume: 0.64,
+  volume: 0.52,
   quality: 'auto' as AttackQuality,
   volumes: {
     pulse: 1,

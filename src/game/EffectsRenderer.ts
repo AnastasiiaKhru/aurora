@@ -20,18 +20,19 @@ interface Floater {
   peak: number
 }
 
+const SHARP = 'Oswald, Outfit, sans-serif'
 const damageInk = { color: 0x14060c, width: 5, join: 'round' as const }
 const damageStyles = {
-  small: new TextStyle({ fontFamily: 'Oswald, Outfit, sans-serif', fontSize: 32, fill: 0xf4f7fb, fontWeight: '600', stroke: damageInk }),
-  mid: new TextStyle({ fontFamily: 'Oswald, Outfit, sans-serif', fontSize: 48, fill: 0xffe8ec, fontWeight: '600', stroke: damageInk }),
-  large: new TextStyle({ fontFamily: 'Oswald, Outfit, sans-serif', fontSize: 74, fill: 0xfff6ea, fontWeight: '700', stroke: damageInk }),
-  huge: new TextStyle({ fontFamily: 'Oswald, Outfit, sans-serif', fontSize: 106, fill: 0xffffff, fontWeight: '700', stroke: damageInk }),
+  small: new TextStyle({ fontFamily: SHARP, fontSize: 32, fill: 0xf4f7fb, fontWeight: '600', stroke: damageInk }),
+  mid: new TextStyle({ fontFamily: SHARP, fontSize: 48, fill: 0xffe8ec, fontWeight: '600', stroke: damageInk }),
+  large: new TextStyle({ fontFamily: SHARP, fontSize: 74, fill: 0xfff6ea, fontWeight: '700', stroke: damageInk }),
+  huge: new TextStyle({ fontFamily: SHARP, fontSize: 106, fill: 0xffffff, fontWeight: '700', stroke: damageInk }),
 }
 
 /** Point chips sit on the avatars: same Oswald numbers as the score, team color as the stroke. */
 const hitStyles = {
   red: new TextStyle({
-    fontFamily: 'Oswald, Outfit, sans-serif',
+    fontFamily: SHARP,
     fontSize: 46,
     fill: 0xfff8f2,
     fontWeight: '700',
@@ -40,7 +41,7 @@ const hitStyles = {
     dropShadow: { alpha: 0.55, angle: Math.PI / 2, blur: 2, color: 0x07080d, distance: 2 },
   }),
   blue: new TextStyle({
-    fontFamily: 'Oswald, Outfit, sans-serif',
+    fontFamily: SHARP,
     fontSize: 46,
     fill: 0xfff8f2,
     fontWeight: '700',
@@ -117,8 +118,8 @@ function vignetteTexture(): Texture {
   if (!ctx) return Texture.EMPTY
   const gradient = ctx.createRadialGradient(256, 240, 80, 256, 256, 340)
   gradient.addColorStop(0, 'rgba(0,0,0,0)')
-  gradient.addColorStop(0.62, 'rgba(0,0,0,0.08)')
-  gradient.addColorStop(1, 'rgba(0,0,0,0.38)')
+  gradient.addColorStop(0.62, 'rgba(0,0,0,0.03)')
+  gradient.addColorStop(1, 'rgba(0,0,0,0.16)')
   ctx.fillStyle = gradient
   ctx.fillRect(0, 0, 512, 512)
   return Texture.from(canvas)
@@ -183,30 +184,13 @@ export class EffectsRenderer {
       ctx.imageSmoothingEnabled = true
       ctx.imageSmoothingQuality = 'high'
       ctx.drawImage(photo, 0, 0, canvas.width, canvas.height)
-      const frame = ctx.getImageData(0, 0, canvas.width, canvas.height)
-      const data = frame.data
-      const widthPx = canvas.width
-      const heightPx = Math.max(1, canvas.height)
-      for (let i = 0; i < data.length; i += 4) {
-        const y = Math.floor(i / 4 / widthPx) / heightPx
-        const band = playerBand(y)
-        const lifted = [expose(data[i]!), expose(data[i + 1]!), expose(data[i + 2]!)]
-        const gray = lifted[0]! * 0.3 + lifted[1]! * 0.59 + lifted[2]! * 0.11
-        const sat = 1.0 + (0.8 - 1.0) * band
-        const dim = 0.96 + (0.76 - 0.96) * band
-        const contrast = 1 + (0.93 - 1) * band
-        data[i] = gradeChannel(gray, lifted[0]!, sat, dim, contrast)
-        data[i + 1] = gradeChannel(gray, lifted[1]!, sat, dim, contrast)
-        data[i + 2] = gradeChannel(gray, lifted[2]!, sat, dim, contrast)
-      }
-      ctx.putImageData(frame, 0, 0)
       const graded = Texture.from(canvas)
       graded.source.scaleMode = 'linear'
       graded.source.autoGenerateMipmaps = true
       graded.source.addressMode = 'clamp-to-edge'
       this.backdrop.texture = graded
     }
-    photo.src = '/canada-usa.png'
+    photo.src = '/poster-scene.jpg'
     this.combatAdd.blendMode = 'add'
     this.flashGfx.blendMode = 'add'
     this.glowGfx.blendMode = 'add'
@@ -375,11 +359,11 @@ export class EffectsRenderer {
     const floor = height * battleConfig.floorTop
     washSide(this.base, 0, width * 0.5, height, 0x4a1220, 0x8a1e36)
     washSide(this.base, width * 0.5, width * 0.5, height, 0x0c2048, 0x123f86)
-    this.base.rect(0, 0, width, height).fill({ color: 0x060910, alpha: 0.08 })
+    this.base.rect(0, 0, width, height).fill({ color: 0x060910, alpha: 0.03 })
     drawDivider(this.base, width, floor, this.time)
     this.base.ellipse(width * 0.28, height * 0.42, width * 0.22, height * 0.08).fill({ color: teamPalette.red, alpha: 0.02 })
     this.base.ellipse(width * 0.72, height * 0.42, width * 0.22, height * 0.08).fill({ color: teamPalette.blue, alpha: 0.02 })
-    this.base.rect(0, floor, width, height - floor).fill({ color: 0x070910, alpha: 0.16 })
+    this.base.rect(0, floor, width, height - floor).fill({ color: 0x070910, alpha: 0.08 })
     this.territoryHit(width, height, 'red')
     this.territoryHit(width, height, 'blue')
   }
@@ -536,30 +520,6 @@ function drawDivider(g: Graphics, width: number, floor: number, time: number): v
   g.rect(x - 1.4, 0, 1.4, h).fill({ color: 0xff4d9a, alpha: 0.72 })
   g.rect(x, 0, 1.4, h).fill({ color: 0x4ad4ff, alpha: 0.72 })
   g.rect(x - 0.35, 0, 0.7, h).fill({ color: 0xffffff, alpha: 0.45 * pulse })
-}
-
-function playerBand(y: number): number {
-  const start = smoothstep(600 / DESIGN_HEIGHT, 660 / DESIGN_HEIGHT, y)
-  const end = 1 - smoothstep(1180 / DESIGN_HEIGHT, 1240 / DESIGN_HEIGHT, y)
-  return Math.max(0, Math.min(1, start * end))
-}
-
-function smoothstep(edge0: number, edge1: number, value: number): number {
-  const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)))
-  return t * t * (3 - 2 * t)
-}
-
-function gradeChannel(gray: number, channel: number, sat: number, dim: number, contrast: number): number {
-  const colored = gray + (channel - gray) * sat
-  const contrasted = (colored - 128) * contrast + 128
-  return Math.min(255, Math.max(0, contrasted * dim))
-}
-
-function expose(channel: number): number {
-  const n = Math.min(1, Math.max(0, channel / 255))
-  const mid = Math.pow(n, 0.92)
-  const lifted = mid * 1.02 + 0.02 * Math.sin(Math.min(1, mid) * Math.PI)
-  return Math.min(255, lifted * 255)
 }
 
 function strokePathSafe(g: Graphics, pts: number[], width: number, color: number, alpha: number): void {

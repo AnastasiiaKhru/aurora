@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { battleConfig } from '../config/battleConfig.ts'
 import { tiktokGifts } from '../config/tiktokGifts.ts'
 import { attackLab, type AttackQuality } from '../game/attacks/lab.ts'
 import { attackStyles, type AttackStyle } from '../game/attacks/style.ts'
@@ -166,12 +167,12 @@ export function DeveloperPanel({ open, onClose, locked = false }: { open: boolea
           </label>
         </div>
         <div className="sim-row">
-          <button type="button" onClick={() => { if (!locked) director.previewNpc('maple') }}>Test Canada dummy attack</button>
-          <button type="button" onClick={() => { if (!locked) director.previewNpc('star') }}>Test USA dummy attack</button>
+          <button type="button" onClick={() => { if (!locked) director.previewNpc('maple') }}>Test No Toilet Paper dummy attack</button>
+          <button type="button" onClick={() => { if (!locked) director.previewNpc('star') }}>Test No Phone dummy attack</button>
         </div>
         <div className="sim-row">
-          <button type="button" onClick={() => { if (!locked) director.simulateRealJoin('red') }}>Simulate viewer joining Canada</button>
-          <button type="button" onClick={() => { if (!locked) director.simulateRealJoin('blue') }}>Simulate viewer joining USA</button>
+          <button type="button" onClick={() => { if (!locked) director.simulateRealJoin('red') }}>Simulate viewer joining No Toilet Paper</button>
+          <button type="button" onClick={() => { if (!locked) director.simulateRealJoin('blue') }}>Simulate viewer joining No Phone</button>
           <button type="button" onClick={() => { if (!locked) director.simulateRealLeave() }}>Simulate viewer leaving</button>
         </div>
       </section>
@@ -179,8 +180,8 @@ export function DeveloperPanel({ open, onClose, locked = false }: { open: boolea
       <section>
         <h3>Match tests</h3>
         <div className="sim-row">
-          <button type="button" onClick={() => { if (!locked) joinWithCommand('C') }}>Join Canada (C)</button>
-          <button type="button" onClick={() => { if (!locked) joinWithCommand('U') }}>Join USA (U)</button>
+          <button type="button" onClick={() => { if (!locked) joinWithCommand('A') }}>Join No Toilet Paper (A)</button>
+          <button type="button" onClick={() => { if (!locked) joinWithCommand('B') }}>Join No Phone (B)</button>
         </div>
         <div className="sim-row">
           <button type="button" onClick={() => { if (!locked) sendLike() }}>Send like</button>
@@ -206,9 +207,9 @@ export function DeveloperPanel({ open, onClose, locked = false }: { open: boolea
       <section>
         <h3>Attack testing</h3>
         <div className="sim-row">
-          <button type="button" onClick={() => setAttackTeam('red')}>Canada</button>
-          <button type="button" onClick={() => setAttackTeam('blue')}>USA</button>
-          <span>{attackTeam === 'red' ? 'Canada' : 'USA'}</span>
+          <button type="button" onClick={() => setAttackTeam('red')}>No Toilet Paper</button>
+          <button type="button" onClick={() => setAttackTeam('blue')}>No Phone</button>
+          <span>{battleConfig.teamNames[attackTeam]}</span>
         </div>
         <div className="quick">
           {attackStyles.map((style) => (
@@ -799,7 +800,7 @@ function testSubject(team: TeamId): { id: string; username: string; avatarUrl: s
   }
   const found = [...director.players.players.values()].find((player) => player.team === team)
   if (found) return { id: found.id, username: found.username, avatarUrl: found.avatarUrl, team: found.team }
-  joinWithCommand(team === 'red' ? 'C' : 'U')
+  joinWithCommand(team === 'red' ? 'A' : 'B')
   return lastSubject!
 }
 
@@ -859,7 +860,7 @@ function eliminateSubject(): void {
 
 function rejoinEliminated(): void {
   if (!eliminated || director.players.players.has(eliminated.id)) return
-  const text = eliminated.team === 'red' ? 'C' : 'U'
+  const text = eliminated.team === 'red' ? 'A' : 'B'
   const person = eliminated
   eliminated = null
   joinWithCommand(text, person)

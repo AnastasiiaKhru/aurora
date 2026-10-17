@@ -69,7 +69,10 @@ const ATTACK_EXTENT = {
 } as const
 
 export function broadcastScale(width = window.innerWidth, height = window.innerHeight): number {
-  return Math.min(width / DESIGN_WIDTH, height / DESIGN_HEIGHT)
+  const fit = Math.min(width / DESIGN_WIDTH, height / DESIGN_HEIGHT)
+  const dpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1
+  const snapped = Math.floor(fit * DESIGN_WIDTH * dpr) / (DESIGN_WIDTH * dpr)
+  return snapped > 0.2 ? snapped : fit
 }
 
 export function permanentAvatarDiameter(power: number, leader: boolean): number {

@@ -88,7 +88,8 @@ test('typed C or U moves an existing player instead of duplicating them', () => 
 })
 
 test('only a whole C, Canada, U, or USA comment picks a team', () => {
-  for (const text of ['C', 'c', ' C ', 'Canada', 'CANADA', '\u00a0c\u200b']) assert.equal(serverTeamCommand(text), 'red', JSON.stringify(text))
+  for (const text of ['A', 'a', 'À', 'C', 'c', ' C ', 'Canada', 'CANADA', '\u00a0c\u200b']) assert.equal(serverTeamCommand(text), 'red', JSON.stringify(text))
+  for (const text of ['B', 'b', 'Ｂ']) assert.equal(serverTeamCommand(text), 'blue', JSON.stringify(text))
   for (const text of ['ca', 'CA!', 'canadian', '🇨🇦']) assert.equal(serverTeamCommand(text), 'red', JSON.stringify(text))
   for (const text of ['U', 'u', ' U ', 'usa', 'USA', 'USA!!!', 'us', 'america', '🇺🇸']) assert.equal(serverTeamCommand(text), 'blue', JSON.stringify(text))
   for (const text of ['cute', 'cool', 'c u later', 'you', 'go canada']) {

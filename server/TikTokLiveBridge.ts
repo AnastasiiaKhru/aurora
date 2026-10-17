@@ -234,13 +234,13 @@ export class TikTokLiveBridge {
   }
 
   handleTeamCommand(viewer: { userId: string; username: string; avatarUrl: string; team: TeamId }): void {
-    console.log(`TEAM COMMAND DETECTED: ${viewer.team === 'red' ? 'CANADA' : 'USA'} @${viewer.username}`)
+    console.log(`TEAM COMMAND DETECTED: ${viewer.team === 'red' ? 'NO TOILET PAPER' : 'NO PHONE'} @${viewer.username}`)
     this.teams.assign(viewer.userId, viewer.team)
     this.present.add(viewer.userId)
     const payload = wireSocial('join', viewer, true)
     console.log('[WS SEND TEAM]', payload)
     this.options.socket.broadcast(payload)
-    console.log(`WS TEAM UPDATE SENT @${viewer.username} -> ${viewer.team === 'red' ? 'CANADA' : 'USA'}`)
+    console.log(`WS TEAM UPDATE SENT @${viewer.username} -> ${viewer.team === 'red' ? 'NO TOILET PAPER' : 'NO PHONE'}`)
   }
 
   private onSocial(message: WebcastSocialMessage, kind: 'follow' | 'share' | 'other'): void {
